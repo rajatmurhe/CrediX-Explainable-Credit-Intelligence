@@ -899,54 +899,6 @@ The user can generate a structured PDF credit assessment report.
 
 ---
 
-# Screenshots
-
-Add screenshots of the actual working application to the `screenshots/` directory.
-
-## Main Dashboard
-
-```markdown
-![CrediX Dashboard](screenshots/dashboard.png)
-```
-
-## Credit Assessment
-
-```markdown
-![Credit Assessment](screenshots/credit_assessment.png)
-```
-
-## Recommendations
-
-```markdown
-![Personalised Recommendations](screenshots/recommendations.png)
-```
-
-## Prediction Confidence
-
-```markdown
-![Prediction Confidence](screenshots/prediction_confidence.png)
-```
-
-## Feature Importance
-
-```markdown
-![Feature Importance](screenshots/feature_importance.png)
-```
-
-## SHAP Explanation
-
-```markdown
-![SHAP Explanation](screenshots/shap_explanation.png)
-```
-
-## PDF Report
-
-```markdown
-![PDF Report](screenshots/pdf_report.png)
-```
-
----
-
 # Outputs
 
 CrediX produces several categories of outputs.
