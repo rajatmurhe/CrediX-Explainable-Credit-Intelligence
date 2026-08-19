@@ -1,1250 +1,352 @@
-# CrediX — Explainable Machine Learning Credit Intelligence
+# CrediX - Explainable Credit Intelligence
 
-CrediX is an Explainable Machine Learning-based credit assessment platform that analyses a user's financial profile, predicts their credit category, explains the factors influencing the prediction, and provides personalised financial recommendations.
+CrediX is a machine learning based credit risk assessment system that classifies customer profiles into Good, Standard, and Poor credit categories.
 
-The system combines Machine Learning, Explainable AI, financial analytics, interactive visualization, and automated PDF reporting into a customer-focused credit intelligence platform.
+The project combines data preprocessing, machine learning model comparison, hyperparameter tuning, probability calibration, model evaluation, feature importance analysis, and an interactive Streamlit dashboard.
 
----
+The system was trained and evaluated using 31,711 customer records.
 
 ## Project Overview
 
-Traditional credit assessment systems often provide a credit score or category without clearly explaining why a particular prediction was made.
+The objective of CrediX is to build a credit risk classification system that not only predicts a customer's credit category but also provides information about the factors influencing the prediction.
 
-CrediX addresses this problem by combining machine learning prediction with Explainable AI.
+The application allows users to enter a customer's personal and financial information and receive:
 
-The system analyses a user's financial and credit-related information and predicts one of three credit categories:
+- Predicted credit category
+- Prediction probabilities
+- Model confidence
+- Feature importance information
+- Financial profile summary
+- Basic financial recommendations
+- Model evaluation information
 
-- Good
-- Standard
-- Poor
+CrediX is intended as an academic and research project and is not a replacement for professional financial advice or real-world lending decisions.
 
-Instead of providing only a prediction, CrediX also provides:
+## Dataset
 
-- Prediction confidence
-- Feature importance
-- SHAP-based explanations
-- Financial profile analysis
-- Personalised recommendations
-- Interactive visualizations
-- Model performance analysis
-- Automated PDF credit reports
+The dataset contains 31,711 records and 21 original columns.
 
-The goal is to make machine learning-based credit assessment more transparent, interpretable, and user-friendly.
+Target distribution:
 
----
+| Credit Score | Records |
+|--------------|---------:|
+| Standard | 19,730 |
+| Good | 7,551 |
+| Poor | 4,430 |
 
-# Problem Statement
+The final model uses seven customer-facing features:
 
-Credit assessment is an important financial decision-making process. Machine learning models can identify complex relationships within financial data, but many models provide predictions without clearly explaining the reasoning behind them.
+| Feature | Description |
+|---------|-------------|
+| Age | Customer age |
+| Occupation | Customer occupation |
+| Annual_Income | Annual income |
+| Num_of_Delayed_Payment | Number of delayed payments |
+| Total_EMI_per_month | Total monthly EMI |
+| Outstanding_Debt | Outstanding debt |
+| Monthly_Balance | Monthly financial balance |
 
-This creates several challenges:
+## Machine Learning Approach
 
-- Lack of transparency
-- Difficulty interpreting model predictions
-- Limited understanding of influential financial factors
-- Difficulty identifying areas for financial improvement
-- Black-box decision making
+The project evaluates multiple classification algorithms before selecting the final model.
 
-CrediX attempts to address these challenges by combining:
+| Model | CV Accuracy | CV Macro F1 |
+|-------|------------:|------------:|
+| Logistic Regression | 34.57% | 33.55% |
+| HistGradientBoosting | 65.44% | 61.24% |
+| Extra Trees | 76.83% | 71.86% |
+| Random Forest | 74.05% | 66.19% |
+
+Extra Trees was selected because it achieved the highest benchmark Macro F1 score.
+
+## Hyperparameter Tuning
+
+The selected Extra Trees model was tuned using cross-validation.
+
+Final parameters:
 
 ```text
-Machine Learning
-        +
-Explainable AI
-        +
-Financial Analytics
-        +
-Personalised Recommendations
-        +
-Interactive Dashboard
-        +
-Automated Reporting
+n_estimators = 150
+max_depth = 24
+max_features = 0.8
+min_samples_split = 5
+min_samples_leaf = 1
 ````
 
----
-
-# Objectives
-
-The main objectives of CrediX are:
-
-1. Develop a Machine Learning-based credit classification system.
-2. Use a real credit dataset instead of artificially generated data.
-3. Compare multiple classification algorithms.
-4. Perform stratified train/test evaluation.
-5. Perform 5-fold cross-validation.
-6. Perform Random Forest hyperparameter tuning.
-7. Evaluate the final model using multiple performance metrics.
-8. Explain model predictions using SHAP.
-9. Identify important financial and credit-related features.
-10. Generate personalised financial recommendations.
-11. Provide an interactive customer-facing dashboard.
-12. Generate downloadable PDF credit assessment reports.
-
----
-
-# Dataset
-
-CrediX uses a real credit dataset containing:
+Best tuned cross-validation Macro F1:
 
 ```text
-Records: 31,711
-Columns: 21
-Target Classes: 3
+0.7410
 ```
 
-The target variable is:
+## Probability Calibration
+
+Since the application displays prediction probabilities, different calibration methods were evaluated.
+
+| Method       | Macro F1 | Brier Score | Log Loss |
+| ------------ | -------: | ----------: | -------: |
+| Uncalibrated |   0.7410 |      0.3448 |   0.6062 |
+| Sigmoid      |   0.7090 |      0.3312 |   0.5682 |
+| Isotonic     |   0.7258 |      0.3277 |   0.5602 |
+
+Isotonic calibration was selected because it produced the lowest Brier score and Log Loss among the evaluated calibration methods.
+
+## Final Model Performance
+
+The final model achieved the following test-set results:
+
+| Metric            |  Score |
+| ----------------- | -----: |
+| Accuracy          | 78.62% |
+| Balanced Accuracy | 73.62% |
+| Macro Precision   | 74.94% |
+| Macro Recall      | 73.62% |
+| Macro F1          | 74.26% |
+| Weighted F1       | 78.52% |
+
+Class-wise performance:
+
+| Class    | Precision | Recall |     F1 |
+| -------- | --------: | -----: | -----: |
+| Good     |    74.98% | 72.85% | 73.90% |
+| Poor     |    67.62% | 63.88% | 65.70% |
+| Standard |    82.22% | 84.14% | 83.17% |
+
+## Confusion Matrix
 
 ```text
-Credit_Score
+                Predicted
+              Good  Poor  Standard
+
+Actual Good    1100    5      405
+Actual Poor       7  566      313
+Actual Standard 360  266     3321
 ```
 
-The three classes are:
+## Explainability
 
-```text
-Good
-Poor
-Standard
-```
+CrediX provides feature importance analysis to show which variables have the greatest influence on the trained model.
 
-## Class Distribution
+The final model's most important features were:
 
-| Credit Category |    Samples |
-| --------------- | ---------: |
-| Standard        |     19,730 |
-| Good            |      7,551 |
-| Poor            |      4,430 |
-| **Total**       | **31,711** |
+| Feature                | Importance |
+| ---------------------- | ---------: |
+| Outstanding_Debt       |     0.1998 |
+| Age                    |     0.1477 |
+| Total_EMI_per_month    |     0.1447 |
+| Num_of_Delayed_Payment |     0.1224 |
+| Annual_Income          |     0.1122 |
+| Monthly_Balance        |     0.0834 |
 
-The dataset contains both numerical and categorical financial features.
+The current implementation uses the Extra Trees model's native Gini/MDI feature importance.
 
----
+## Application
 
-# Features Used
+The project includes an interactive Streamlit dashboard.
 
-The final model uses 20 predictive features.
+The dashboard provides:
 
-## Numerical Features
-
-```text
-Age
-Annual_Income
-Num_Bank_Accounts
-Num_Credit_Card
-Interest_Rate
-Num_of_Loan
-Delay_from_due_date
-Num_of_Delayed_Payment
-Changed_Credit_Limit
-Num_Credit_Inquiries
-Outstanding_Debt
-Credit_Utilization_Ratio
-Total_EMI_per_month
-Amount_invested_monthly
-Monthly_Balance
-Credit_History_Age_Months
-```
-
-## Categorical Features
-
-```text
-Occupation
-Credit_Mix
-Payment_of_Min_Amount
-Payment_Behaviour
-```
-
----
-
-# Machine Learning Pipeline
-
-The complete CrediX Machine Learning pipeline is:
-
-```text
-Real Credit Dataset
-        |
-        v
-Data Cleaning
-        |
-        v
-Feature Selection
-        |
-        v
-Numerical + Categorical Preprocessing
-        |
-        v
-Stratified Train/Test Split
-        |
-        v
-5-Fold Cross Validation
-        |
-        v
-Model Comparison
-        |
-        +-------------------+
-        |                   |
-        v                   v
-Logistic Regression    Decision Tree
-        |                   |
-        +---------+---------+
-                  |
-                  v
-            Random Forest
-                  |
-                  v
-       Hyperparameter Tuning
-                  |
-                  v
-          Final Random Forest
-                  |
-                  v
-        Model Evaluation
-                  |
-          +-------+-------+
-          |       |       |
-          v       v       v
-       SHAP   Feature   Prediction
-              Importance Probability
-                  |
-                  v
-        Personalised Recommendations
-                  |
-                  v
-          Streamlit Dashboard
-                  |
-                  v
-             PDF Report
-```
-
----
-
-# Data Preprocessing
-
-The dataset contains both numerical and categorical variables.
-
-## Numerical Processing
-
-Numerical features are processed using:
-
-* Missing-value imputation
-* Numeric conversion
-* Infinite-value handling
-* Standardization
-
-The numerical preprocessing pipeline uses:
-
-```text
-SimpleImputer(strategy="median")
-        ↓
-StandardScaler()
-```
-
-## Categorical Processing
-
-Categorical features are processed using:
-
-```text
-SimpleImputer(strategy="most_frequent")
-        ↓
-OneHotEncoder(handle_unknown="ignore")
-```
-
-This converts categorical financial information into machine-learning-compatible numerical representations.
-
----
-
-# Train/Test Split
-
-The dataset is divided using a stratified train/test split.
-
-```text
-Training Samples : 25,368
-Testing Samples  : 6,343
-```
-
-The stratification ensures that the distribution of the three credit classes is preserved between training and testing data.
-
----
-
-# Machine Learning Models
-
-CrediX evaluates three different classification algorithms.
-
-## 1. Logistic Regression
-
-Logistic Regression is used as a linear baseline model.
-
-It provides a comparison between a linear classification approach and nonlinear tree-based approaches.
-
----
-
-## 2. Decision Tree
-
-Decision Tree is used as a tree-based baseline classifier.
-
-It recursively splits the data based on feature values to create classification decisions.
-
-Decision Trees are relatively easy to interpret and can capture nonlinear relationships.
-
----
-
-## 3. Random Forest
-
-Random Forest is the primary model used by the final CrediX system.
-
-Random Forest is an ensemble learning algorithm that combines multiple decision trees to produce a more robust prediction.
-
-Advantages include:
-
-* Handles nonlinear relationships
-* Works well with structured data
-* Captures feature interactions
-* Provides feature importance
-* Works effectively with SHAP
-* Reduces reliance on a single decision tree
-
----
-
-# Model Comparison
-
-5-fold stratified cross-validation was used to compare the three models.
-
-| Model               | Mean CV Accuracy |
-| ------------------- | ---------------: |
-| Logistic Regression |       **68.02%** |
-| Decision Tree       |       **69.43%** |
-| Random Forest       |       **74.37%** |
-
-Random Forest achieved the highest cross-validation performance before hyperparameter tuning.
-
----
-
-# Hyperparameter Tuning
-
-Random Forest hyperparameters were optimized using `GridSearchCV` with 5-fold cross-validation.
-
-The search evaluated different combinations of:
-
-```text
-n_estimators
-max_depth
-min_samples_split
-min_samples_leaf
-```
-
-The best configuration was:
-
-```text
-n_estimators       = 250
-max_depth          = None
-min_samples_split  = 2
-min_samples_leaf   = 1
-class_weight       = balanced
-max_features       = sqrt
-random_state       = 42
-```
-
-The tuned Random Forest achieved:
-
-```text
-5-Fold Cross-Validation Accuracy = 78.66%
-```
-
----
-
-# Final Model Performance
-
-The final Random Forest model was evaluated on the untouched test dataset containing:
-
-```text
-6,343 samples
-```
-
-The final results were:
-
-| Metric        |      Score |
-| ------------- | ---------: |
-| **Accuracy**  | **80.20%** |
-| **Precision** | **79.86%** |
-| **Recall**    | **80.20%** |
-| **F1-Score**  | **79.65%** |
-
----
-
-# Classification Report
-
-The final model achieved:
-
-| Credit Category      | Precision |   Recall | F1-Score |   Support |
-| -------------------- | --------: | -------: | -------: | --------: |
-| Good                 |      0.76 |     0.73 |     0.75 |     1,510 |
-| Poor                 |      0.76 |     0.53 |     0.62 |       886 |
-| Standard             |      0.82 |     0.89 |     0.85 |     3,947 |
-| **Weighted Average** |  **0.80** | **0.80** | **0.80** | **6,343** |
-
-The model performs particularly well on the Standard category, while the Poor category remains more challenging to classify.
-
----
-
-# Confusion Matrix
-
-The final model produced the following confusion matrix:
-
-```text
-                  Predicted
-              Good   Poor   Standard
-
-Good          1106     21       383
-
-Poor            41    467       378
-
-Standard       303    130      3514
-```
-
-The model correctly classified:
-
-```text
-Good:
-1106 / 1510
-
-Poor:
-467 / 886
-
-Standard:
-3514 / 3947
-```
-
-The Standard category has the highest recall, while Poor is the most difficult category for the current model.
-
----
-
-# Feature Importance
-
-The Random Forest model provides feature importance values.
-
-The most influential features in the final model were:
-
-| Rank | Feature                   | Importance |
-| ---: | ------------------------- | ---------: |
-|    1 | Delay_from_due_date       |     0.0781 |
-|    2 | Outstanding_Debt          |     0.0630 |
-|    3 | Interest_Rate             |     0.0620 |
-|    4 | Num_Credit_Card           |     0.0559 |
-|    5 | Credit_Mix_Good           |     0.0520 |
-|    6 | Credit_History_Age_Months |     0.0514 |
-|    7 | Credit_Mix_Standard       |     0.0506 |
-|    8 | Annual_Income             |     0.0504 |
-|    9 | Monthly_Balance           |     0.0482 |
-|   10 | Changed_Credit_Limit      |     0.0468 |
-
-This provides a global understanding of which variables are most influential within the Random Forest model.
-
----
-
-# Explainable AI
-
-CrediX uses SHAP:
-
-```text
-SHapley Additive exPlanations
-```
-
-to explain machine learning predictions.
-
-SHAP provides feature-level contribution values that help explain how individual variables influence a prediction.
-
-The explainability pipeline is:
-
-```text
-User Financial Profile
-        |
-        v
-Trained Random Forest
-        |
-        v
-Prediction
-        |
-        v
-SHAP Explainer
-        |
-        v
-Feature Contributions
-        |
-        v
-Human-Readable Explanation
-```
-
----
-
-# Why SHAP?
-
-A prediction alone does not explain the reasoning behind a machine learning decision.
-
-For example:
-
-```text
-Predicted Credit Category:
-Standard
-```
-
-does not explain why the model reached that decision.
-
-SHAP allows CrediX to investigate the contribution of individual financial factors.
-
-This can help answer questions such as:
-
-* Which financial factors influenced the prediction?
-* Which factors increased or decreased the model output?
-* Which variables were most influential for the individual prediction?
-
----
-
-# Prediction Confidence
-
-CrediX uses the probability output of the Random Forest classifier to display the model's confidence across the three credit categories.
-
-Example:
-
-```text
-Good       28.8%
-Poor       21.2%
-Standard   50.0%
-```
-
-The category with the highest predicted probability becomes the final predicted class.
-
----
-
-# Personalised Recommendations
-
-The platform provides financial recommendations based on the user's financial profile.
-
-Examples include:
-
-```text
-Reduce outstanding debt
-
-Manage loan exposure
-
-Reduce excessive EMI burden
-
-Maintain a healthy account balance
-
-Improve payment behaviour
-
-Monitor credit utilization
-```
-
-These recommendations are intended as analytical suggestions and are not professional financial advice.
-
----
-
-# Interactive Dashboard
-
-The CrediX dashboard is developed using Streamlit.
-
-The dashboard provides an interactive interface for:
-
-* Entering financial information
-* Running credit predictions
-* Viewing model confidence
-* Viewing financial metrics
-* Viewing recommendations
-* Viewing feature importance
-* Viewing SHAP explanations
-* Viewing model performance
-* Generating PDF reports
-
----
-
-# Dashboard Workflow
-
-```text
-Enter Financial Information
-             |
-             v
-Analyse Credit Profile
-             |
-             v
-Machine Learning Prediction
-             |
-             v
-Credit Category
-             |
-             v
-Prediction Confidence
-             |
-             v
-Financial Snapshot
-             |
-             v
-Personalised Recommendations
-             |
-             v
-Explainable AI
-             |
-             v
-Feature Importance
-             |
-             v
-PDF Credit Report
-```
-
----
-
-# PDF Report Generation
-
-CrediX provides automated PDF report generation using ReportLab.
-
-The generated report can include:
-
-* Financial profile
-* Predicted credit category
-* Prediction probabilities
-* Model information
+* Personal profile inputs
+* Financial profile inputs
+* Credit category prediction
+* Prediction probability distribution
+* Model confidence
+* Financial snapshot
+* Feature importance analysis
+* Model performance information
+* Model input inspection
 * Financial recommendations
-* Credit assessment information
 
-This provides a structured and shareable version of the assessment.
+Users can enter values such as age, occupation, annual income, delayed payments, monthly EMI, outstanding debt, and monthly balance.
 
----
+The application then passes these values through the same preprocessing and trained model pipeline used during development.
 
-# Technology Stack
-
-## Programming Language
-
-* Python
-
-## Machine Learning
-
-* Scikit-learn
-* Random Forest
-* Decision Tree
-* Logistic Regression
-
-## Data Processing
-
-* Pandas
-* NumPy
-
-## Explainable AI
-
-* SHAP
-
-## Visualization
-
-* Matplotlib
-* Seaborn
-
-## Web Application
-
-* Streamlit
-
-## PDF Generation
-
-* ReportLab
-
-## Model Persistence
-
-* Joblib
-
-## Development Tools
-
-* Visual Studio Code
-* Git
-* GitHub
-* Python Virtual Environment
-
----
-
-# Project Structure
+## Project Structure
 
 ```text
-CrediX/
-│
+xai_credit_project/
+|
 ├── app.py
 ├── model.py
-├── visuals.py
-├── pdf_report.py
 ├── report.py
-├── requirements.txt
-├── README.md
-├── .gitignore
+├── pdf_report.py
+├── visuals.py
+├── test_streamlit.py
+|
 │
-├── data/
-│   └── credit_data.csv
-│
+│── credit_data.csv
+|
 ├── trained_credit_model.joblib
+├── preprocessor.joblib
 ├── label_encoder.joblib
 ├── feature_names.joblib
 ├── model_metrics.joblib
-├── preprocessor.joblib
-│
-├── screenshots/
-│   ├── dashboard.png
-│   ├── credit_assessment.png
-│   ├── recommendations.png
-│   ├── prediction_confidence.png
-│   ├── feature_importance.png
-│   ├── shap_explanation.png
-│   └── pdf_report.png
-│
-└── outputs/
-    ├── confusion_matrix.png
-    ├── feature_importance.png
-    ├── shap_summary.png
-    └── prediction_confidence.png
+├── feature_bounds.joblib
+|
+├── requirements.txt
+├── README.md
+└── .gitignore
 ```
 
----
+## Technologies Used
 
-# Installation
+Python
 
-## Prerequisites
+Pandas
 
-Install the following before running CrediX:
+NumPy
 
-* Python 3.11+
-* pip
-* Git
+Scikit-learn
 
----
+Joblib
 
-# Clone the Repository
+Streamlit
+
+Matplotlib
+
+Plotly
+
+ReportLab
+
+## Installation
+
+Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/CrediX.git
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd xai_credit_project
 ```
 
-Navigate to the project:
-
-```bash
-cd CrediX
-```
-
----
-
-# Create a Virtual Environment
-
-## macOS / Linux
+Create a virtual environment:
 
 ```bash
 python3 -m venv venv
-```
-
-Activate it:
-
-```bash
 source venv/bin/activate
 ```
 
-## Windows
-
-```bash
-python -m venv venv
-```
-
-Activate:
-
-```bash
-venv\Scripts\activate
-```
-
----
-
-# Install Dependencies
-
-Install all required packages:
+Install the required packages:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Main dependencies include:
+## Running the Application
 
-```text
-pandas
-numpy
-scikit-learn
-shap
-matplotlib
-seaborn
-streamlit
-reportlab
-joblib
-```
-
----
-
-# Training the Model
-
-The model can be trained using:
-
-```bash
-python model.py
-```
-
-The training pipeline performs:
-
-```text
-Data Loading
-     ↓
-Data Cleaning
-     ↓
-Feature Preprocessing
-     ↓
-Train/Test Split
-     ↓
-5-Fold Cross Validation
-     ↓
-Model Comparison
-     ↓
-Random Forest Hyperparameter Tuning
-     ↓
-Final Model Training
-     ↓
-Model Evaluation
-     ↓
-Model Persistence
-```
-
----
-
-# Saved Model Artifacts
-
-After successful training, the following files are generated:
-
-```text
-trained_credit_model.joblib
-label_encoder.joblib
-feature_names.joblib
-model_metrics.joblib
-preprocessor.joblib
-```
-
-These files store the trained machine learning model, label encoding information, feature information, evaluation metrics, and preprocessing pipeline.
-
----
-
-# Run the Streamlit Application
-
-After installing dependencies:
+Start the Streamlit application:
 
 ```bash
 streamlit run app.py
 ```
 
-The application will normally be available at:
+The application will open in the browser.
 
-```text
-http://localhost:8501
+## Training the Model
+
+The complete model training and evaluation pipeline can be executed using:
+
+```bash
+python model.py
 ```
 
-Open the URL in a browser.
+The script performs:
 
----
+1. Dataset ingestion
+2. Data validation
+3. Data sanitization
+4. Target distribution analysis
+5. Model benchmarking
+6. Model selection
+7. Hyperparameter tuning
+8. Probability calibration
+9. Final test evaluation
+10. Feature importance analysis
+11. Model artifact generation
+12. Sanity testing
 
-# Usage
+## Model Files
 
-## Step 1 — Enter Financial Information
-
-Enter the required financial and credit information into the dashboard.
-
----
-
-## Step 2 — Analyse Credit Profile
-
-Click the credit analysis button.
-
-The application sends the information through the trained machine learning pipeline.
-
----
-
-## Step 3 — View Prediction
-
-The dashboard displays:
-
-* Predicted credit category
-* Prediction probability
-* Model confidence
-
----
-
-## Step 4 — View Recommendations
-
-The system provides personalised financial recommendations based on the financial profile.
-
----
-
-## Step 5 — View Explainable AI
-
-The user can inspect the factors contributing to the prediction through SHAP-based explanations.
-
----
-
-## Step 6 — View Visual Analytics
-
-The dashboard can display:
-
-* Feature importance
-* Prediction confidence
-* Confusion matrix
-* SHAP analysis
-* Model performance
-
----
-
-## Step 7 — Generate PDF
-
-The user can generate a structured PDF credit assessment report.
-
----
-
-# Outputs
-
-CrediX produces several categories of outputs.
-
-## Machine Learning Outputs
+The training process generates the following files:
 
 ```text
-Credit Category
-Prediction Probability
-Accuracy
-Precision
-Recall
-F1-Score
-Classification Report
-Confusion Matrix
+trained_credit_model.joblib
+preprocessor.joblib
+label_encoder.joblib
+feature_names.joblib
+model_metrics.joblib
+feature_bounds.joblib
 ```
 
-## Explainability Outputs
+These files are used by the Streamlit application to load the trained model and make predictions without retraining the model.
+
+## Project Workflow
 
 ```text
-Feature Importance
-SHAP Feature Contributions
-Individual Prediction Explanation
-```
-
-## Dashboard Outputs
-
-```text
-Credit Assessment
-Financial Snapshot
-Prediction Confidence
-Personalised Recommendations
-Visual Analytics
-```
-
-## Reporting Outputs
-
-```text
-Automated PDF Credit Report
-```
-
----
-
-# Advantages
-
-CrediX provides:
-
-1. Real-dataset-based machine learning.
-2. 31,711 financial records for model development.
-3. 20 predictive features.
-4. Multiple machine learning models.
-5. 5-fold cross-validation.
-6. Hyperparameter tuning.
-7. 80.20% held-out test accuracy.
-8. SHAP-based explainability.
-9. Feature importance analysis.
-10. Prediction probability analysis.
-11. Personalised recommendations.
-12. Interactive Streamlit dashboard.
-13. Automated PDF reporting.
-14. Persisted trained model artifacts.
-
----
-
-# Limitations
-
-Although the model demonstrates useful performance, several limitations remain.
-
-## 1. Dataset Limitations
-
-The model is dependent on the characteristics and quality of the available dataset.
-
-## 2. Class Performance
-
-The model performs better on the Standard class than the Poor class.
-
-The Poor class achieved:
-
-```text
-Precision: 0.76
-Recall:    0.53
-F1-Score:  0.62
-```
-
-Further work is required to improve minority-class classification.
-
-## 3. Production Deployment
-
-The current implementation is an academic and portfolio prototype rather than a production banking credit-scoring system.
-
-## 4. Financial Decisions
-
-The predictions and recommendations should not be considered professional financial advice.
-
-## 5. Generalization
-
-Additional external datasets would be required to establish how well the model generalizes to other populations and financial environments.
-
----
-
-# Future Enhancements
-
-## 1. Advanced Machine Learning
-
-Future versions could evaluate:
-
-* XGBoost
-* LightGBM
-* Gradient Boosting
-* Support Vector Machines
-* Neural Networks
-
----
-
-## 2. Improved Class Imbalance Handling
-
-Future work could investigate:
-
-* SMOTE
-* Borderline-SMOTE
-* Cost-sensitive learning
-* Threshold optimization
-* Balanced ensemble methods
-
-The objective would be to improve performance on the Poor class without unnecessarily reducing performance on the other classes.
-
----
-
-## 3. Advanced Explainability
-
-Future versions could include:
-
-* LIME
-* Counterfactual explanations
-* Interactive SHAP plots
-* What-if analysis
-
----
-
-## 4. What-If Credit Simulation
-
-Users could modify financial variables and immediately see how the model's prediction changes.
-
-Example:
-
-```text
-Current Profile
-       |
-       v
-Predicted Category
-       |
-       v
-What-If Analysis
-       |
-       +---- Reduce Outstanding Debt
-       |
-       +---- Reduce EMI
-       |
-       +---- Improve Payment Behaviour
-       |
-       +---- Increase Balance
-       |
-       v
-New Model Prediction
-```
-
----
-
-## 5. Model Monitoring
-
-A production version could monitor:
-
-* Data drift
-* Prediction drift
-* Feature distribution
-* Model performance
-* Class distribution changes
-
----
-
-## 6. Cloud Deployment
-
-The application could be deployed using:
-
-* Streamlit Community Cloud
-* Docker
-* AWS
-* Microsoft Azure
-* Google Cloud
-
----
-
-## 7. Security Enhancements
-
-A production implementation could include:
-
-* User authentication
-* Role-based access control
-* Encryption
-* Secure API communication
-* Secure database storage
-* Audit logging
-
----
-
-# Ethical Considerations
-
-Credit assessment systems can influence important financial decisions.
-
-A production implementation should therefore consider:
-
-* Data privacy
-* Fairness
-* Bias detection
-* Explainability
-* Transparency
-* Regulatory compliance
-* Human oversight
-
-CrediX is designed as an academic and educational decision-support prototype and should not be used as an autonomous financial decision-making system.
-
----
-
-# Technical Contribution
-
-The technical contribution of CrediX is the integration of multiple components into a single Explainable Machine Learning workflow:
-
-```text
-Real Credit Dataset
-        +
-Data Preprocessing
-        +
-Multiple ML Models
-        +
-Cross Validation
-        +
+Dataset
+   |
+   v
+Data Cleaning
+   |
+   v
+Feature Preparation
+   |
+   v
+Model Comparison
+   |
+   v
+Extra Trees Selection
+   |
+   v
 Hyperparameter Tuning
-        +
-Random Forest
-        +
-SHAP Explainability
-        +
+   |
+   v
+Probability Calibration
+   |
+   v
+Model Evaluation
+   |
+   v
 Feature Importance
-        +
-Prediction Confidence
-        +
-Personalised Recommendations
-        +
-Streamlit Dashboard
-        +
-PDF Reporting
+   |
+   v
+Streamlit Application
 ```
 
-The project demonstrates an end-to-end Machine Learning workflow rather than simply training a classifier.
+## Key Results
 
----
+The completed system provides an end-to-end machine learning workflow for credit risk classification.
 
-# Final Model Summary
+The final model achieved:
 
-The final CrediX model uses:
+* 78.62% test accuracy
+* 73.62% balanced accuracy
+* 74.26% Macro F1
+* 78.52% weighted F1
 
-```text
-Dataset:
-31,711 records
+The application also provides probability estimates and feature importance information to make the model output easier to interpret.
 
-Predictive Features:
-20
+## Limitations
 
-Target Classes:
-3
+The model is trained on the available dataset and its performance depends on the quality and distribution of that data.
 
-Models Compared:
-3
+Feature importance describes the influence of features within the trained model and should not be interpreted as proof of causation.
 
-Cross Validation:
-5-Fold Stratified CV
+The system should not be used to make real-world lending decisions without additional validation, fairness analysis, regulatory review, and domain-specific testing.
 
-Best Model:
-Tuned Random Forest
+## Future Improvements
 
-Best CV Accuracy:
-78.66%
+Possible extensions include:
 
-Final Test Samples:
-6,343
+* SHAP based local explanations
+* LIME explanations
+* Fairness and bias analysis
+* Model drift detection
+* Automated model monitoring
+* FastAPI deployment
+* Docker deployment
+* Cloud deployment
+* Model versioning
+* Automated retraining
 
-Final Test Accuracy:
-80.20%
+## Author
 
-Precision:
-79.86%
-
-Recall:
-80.20%
-
-F1-Score:
-79.65%
-```
-
----
-
-# Conclusion
-
-CrediX demonstrates how Machine Learning and Explainable AI can be combined to create a transparent credit assessment platform.
-
-Rather than producing only a credit classification, the system attempts to provide a complete decision-support workflow:
-
-```text
-What is the predicted credit category?
-
-How confident is the model?
-
-Which financial factors influenced the prediction?
-
-What areas of the financial profile could potentially be improved?
-```
-
-The final system uses a real dataset containing 31,711 records and 20 predictive features. Three machine learning algorithms were compared using 5-fold cross-validation, followed by Random Forest hyperparameter tuning.
-
-The final tuned Random Forest achieved:
-
-```text
-5-Fold CV Accuracy : 78.66%
-
-Test Accuracy      : 80.20%
-Precision           : 79.86%
-Recall              : 80.20%
-F1-Score            : 79.65%
-```
-
-The project combines these machine learning capabilities with SHAP-based explainability, feature importance analysis, personalised recommendations, interactive visualization, and automated PDF reporting.
-
----
-
-# Author
-
-**Rajat Murhe**
-
-B.Tech Computer Science Engineering
-Specialization: Artificial Intelligence & Machine Learning
-
----
-
-# License
-
-This project was developed for academic, educational, and portfolio purposes.
-
-````
-
+Rajat Murhe
