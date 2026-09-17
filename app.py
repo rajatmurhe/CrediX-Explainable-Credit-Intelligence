@@ -280,42 +280,81 @@ div[data-baseweb="select"] {
 
 .stButton > button {
 
-    width: 100%;
+    width: 100% !important;
 
-    min-height: 60px;
+    min-height: 60px !important;
 
-    border-radius: 14px;
+    border-radius: 14px !important;
 
-    border: none;
+    border: none !important;
 
-    background:
-        linear-gradient(
-            90deg,
-            #6D82FF,
-            #7B4DFF
-        );
+    background: linear-gradient(
+        90deg,
+        #6D82FF,
+        #7B4DFF
+    ) !important;
 
-    color: white;
+    color: #FFFFFF !important;
 
-    font-size: 18px;
+    -webkit-text-fill-color: #FFFFFF !important;
 
-    font-weight: 700;
+    font-size: 18px !important;
+
+    font-weight: 700 !important;
+
+    opacity: 1 !important;
+
+    cursor: pointer !important;
 
     box-shadow:
         0 10px 35px
         rgba(103,88,255,0.25);
 
-    transition: 0.2s ease;
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
 }
 
+.stButton > button p {
+
+    color: #FFFFFF !important;
+
+    -webkit-text-fill-color: #FFFFFF !important;
+
+    font-weight: 700 !important;
+}
 
 .stButton > button:hover {
+
+    color: #FFFFFF !important;
+
+    -webkit-text-fill-color: #FFFFFF !important;
 
     transform: translateY(-1px);
 
     box-shadow:
         0 14px 40px
-        rgba(103,88,255,0.35);
+        rgba(103,88,255,0.38);
+}
+
+.stButton > button:active {
+
+    color: #FFFFFF !important;
+
+    -webkit-text-fill-color: #FFFFFF !important;
+
+    transform: translateY(0);
+}
+
+.stButton > button:disabled {
+
+    opacity: 1 !important;
+
+    color: #FFFFFF !important;
+
+    -webkit-text-fill-color: #FFFFFF !important;
+
+    cursor: pointer !important;
 }
 
 
@@ -1033,7 +1072,8 @@ st.markdown(
 analyse = st.button(
     "Analyse My Credit Profile",
     type="primary",
-    use_container_width=True
+    use_container_width=True,
+    disabled=False
 )
 
 
