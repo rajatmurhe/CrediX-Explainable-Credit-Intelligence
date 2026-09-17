@@ -361,6 +361,180 @@ hr {
         rgba(255,255,255,0.08) !important;
 }
 
+
+/* =========================================================
+   PREMIUM INPUT CARD DESIGN
+   ========================================================= */
+
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 1px solid rgba(112, 133, 190, 0.20) !important;
+    border-radius: 18px !important;
+    background:
+        linear-gradient(
+            145deg,
+            rgba(20, 29, 48, 0.96),
+            rgba(12, 18, 31, 0.98)
+        ) !important;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+    padding: 5px !important;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    border-color: rgba(113, 134, 255, 0.36) !important;
+}
+
+.input-card-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(105, 124, 255, 0.20),
+            rgba(119, 82, 255, 0.12)
+        );
+    border: 1px solid rgba(112, 134, 255, 0.22);
+    color: #9AA8FF;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.input-card-title {
+    color: #F1F4FA;
+    font-size: 17px;
+    font-weight: 750;
+    letter-spacing: -0.2px;
+    margin-bottom: 4px;
+}
+
+.input-card-subtitle {
+    color: #7D8AA2;
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 14px;
+}
+
+.model-input-card {
+    min-height: 195px;
+    padding: 7px 4px;
+}
+
+.model-input-card .input-card-icon {
+    background:
+        linear-gradient(
+            135deg,
+            rgba(124, 86, 255, 0.24),
+            rgba(93, 119, 255, 0.14)
+        );
+    color: #AF9CFF;
+}
+
+.model-input-list {
+    color: #71809A;
+    font-size: 11px;
+    line-height: 1.65;
+    margin-top: 10px;
+}
+
+div[data-testid="stNumberInput"] {
+    margin-top: 0 !important;
+}
+
+div[data-testid="stNumberInput"] input {
+    background: #111827 !important;
+    color: #F4F6FA !important;
+    border: 1px solid #2A3852 !important;
+    border-radius: 11px !important;
+    min-height: 44px !important;
+    font-size: 15px !important;
+    font-weight: 550 !important;
+}
+
+div[data-testid="stNumberInput"] input:focus {
+    border-color: #7186FF !important;
+    box-shadow: 0 0 0 1px rgba(113, 134, 255, 0.28) !important;
+}
+
+div[data-testid="stNumberInput"] button {
+    background: #1A2438 !important;
+    color: #DDE4F3 !important;
+    border: none !important;
+}
+
+div[data-testid="stNumberInput"] button:hover {
+    background: #25314A !important;
+}
+
+div[data-testid="stSelectbox"] {
+    margin-top: 0 !important;
+}
+
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background: #111827 !important;
+    border: 1px solid #2A3852 !important;
+    border-radius: 11px !important;
+    min-height: 44px !important;
+}
+
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+    border-color: #7186FF !important;
+    box-shadow: 0 0 0 1px rgba(113, 134, 255, 0.28) !important;
+}
+
+div[data-testid="stSelectbox"] [data-baseweb="select"] span {
+    color: #F4F6FA !important;
+    font-size: 15px !important;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stWidgetLabel"] {
+    margin-bottom: 0 !important;
+}
+
+.section-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(101, 121, 255, 0.24),
+            rgba(119, 79, 255, 0.14)
+        );
+    border: 1px solid rgba(110, 130, 255, 0.23);
+    color: #A9B5FF;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.section-icon-finance {
+    background:
+        linear-gradient(
+            135deg,
+            rgba(128, 96, 255, 0.25),
+            rgba(96, 121, 255, 0.14)
+        );
+    color: #B6A3FF;
+}
+
+.section-heading {
+    color: #F3F5FA;
+    font-size: 29px;
+    font-weight: 800;
+    letter-spacing: -0.8px;
+}
+
+.section-helper {
+    color: #747F95;
+    font-size: 13px;
+    margin-top: 3px;
+}
 </style>
 """,
     unsafe_allow_html=True
@@ -513,161 +687,348 @@ render_html(
 # PERSONAL PROFILE
 # ============================================================
 
-st.header("Personal Profile")
+render_html(
+    """
+    <div style="
+        display:flex;
+        align-items:center;
+        gap:15px;
+        margin-bottom:22px;
+    ">
 
-st.caption(
-    "Tell us a little about yourself."
+        <div class="section-icon">
+            ◉
+        </div>
+
+        <div>
+            <div class="section-heading">
+                Personal Profile
+            </div>
+
+            <div class="section-helper">
+                Tell us a little about yourself.
+            </div>
+        </div>
+
+    </div>
+    """
 )
 
-profile_col1, profile_col2 = st.columns(2)
+
+profile_col1, profile_col2 = st.columns(
+    2,
+    gap="large"
+)
 
 
 with profile_col1:
 
-    age = st.number_input(
-        "Age",
-        min_value=18,
-        max_value=100,
-        value=30,
-        step=1
-    )
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ◷
+            </div>
+
+            <div class="input-card-title">
+                Age
+            </div>
+
+            <div class="input-card-subtitle">
+                Enter your current age
+            </div>
+            """
+        )
+
+        age = st.number_input(
+            "Age",
+            min_value=18,
+            max_value=100,
+            value=30,
+            step=1,
+            label_visibility="collapsed"
+        )
 
 
 with profile_col2:
 
-    occupation = st.selectbox(
-        "Occupation",
-        OCCUPATIONS,
-        index=(
-            OCCUPATIONS.index("Accountant")
-            if "Accountant" in OCCUPATIONS
-            else 0
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ◈
+            </div>
+
+            <div class="input-card-title">
+                Occupation
+            </div>
+
+            <div class="input-card-subtitle">
+                Select your profession
+            </div>
+            """
         )
-    )
 
-
-st.markdown("<br>", unsafe_allow_html=True)
+        occupation = st.selectbox(
+            "Occupation",
+            OCCUPATIONS,
+            index=(
+                OCCUPATIONS.index("Accountant")
+                if "Accountant" in OCCUPATIONS
+                else 0
+            ),
+            label_visibility="collapsed"
+        )
 
 
 # ============================================================
 # FINANCIAL PROFILE
 # ============================================================
 
-st.header("Financial Profile")
-
-st.caption(
-    "Enter the financial information used by the CrediX model."
+st.markdown(
+    "<br><br>",
+    unsafe_allow_html=True
 )
 
 
-financial_col1, financial_col2, financial_col3 = st.columns(3)
+render_html(
+    """
+    <div style="
+        display:flex;
+        align-items:center;
+        gap:15px;
+        margin-bottom:22px;
+    ">
+
+        <div class="section-icon section-icon-finance">
+            ₹
+        </div>
+
+        <div>
+            <div class="section-heading">
+                Financial Profile
+            </div>
+
+            <div class="section-helper">
+                Enter the financial information used by the CrediX model.
+            </div>
+        </div>
+
+    </div>
+    """
+)
+
+
+financial_col1, financial_col2, financial_col3 = st.columns(
+    3,
+    gap="large"
+)
 
 
 with financial_col1:
 
-    annual_income = st.number_input(
-        "Annual Income",
-        min_value=0.0,
-        max_value=1_000_000_000.0,
-        value=60000.0,
-        step=1000.0,
-        format="%.2f"
-    )
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ₹
+            </div>
+
+            <div class="input-card-title">
+                Annual Income
+            </div>
+
+            <div class="input-card-subtitle">
+                Your total yearly income
+            </div>
+            """
+        )
+
+        annual_income = st.number_input(
+            "Annual Income",
+            min_value=0.0,
+            max_value=1_000_000_000.0,
+            value=60000.0,
+            step=1000.0,
+            format="%.2f",
+            label_visibility="collapsed"
+        )
 
 
 with financial_col2:
 
-    delayed_payments = st.number_input(
-        "Delayed Payments",
-        min_value=0,
-        max_value=100,
-        value=1,
-        step=1
-    )
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ◷
+            </div>
+
+            <div class="input-card-title">
+                Delayed Payments
+            </div>
+
+            <div class="input-card-subtitle">
+                Number of past delayed payments
+            </div>
+            """
+        )
+
+        delayed_payments = st.number_input(
+            "Delayed Payments",
+            min_value=0,
+            max_value=100,
+            value=1,
+            step=1,
+            label_visibility="collapsed"
+        )
 
 
 with financial_col3:
 
-    monthly_emi = st.number_input(
-        "Total Monthly EMI",
-        min_value=0.0,
-        max_value=10_000_000.0,
-        value=5000.0,
-        step=100.0,
-        format="%.2f"
-    )
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ▣
+            </div>
+
+            <div class="input-card-title">
+                Total Monthly EMI
+            </div>
+
+            <div class="input-card-subtitle">
+                Total amount paid toward EMIs each month
+            </div>
+            """
+        )
+
+        monthly_emi = st.number_input(
+            "Total Monthly EMI",
+            min_value=0.0,
+            max_value=10_000_000.0,
+            value=5000.0,
+            step=100.0,
+            format="%.2f",
+            label_visibility="collapsed"
+        )
 
 
-financial_col4, financial_col5, financial_col6 = st.columns(3)
+financial_col4, financial_col5, financial_col6 = st.columns(
+    3,
+    gap="large"
+)
 
 
 with financial_col4:
 
-    outstanding_debt = st.number_input(
-        "Outstanding Debt",
-        min_value=0.0,
-        max_value=1_000_000_000.0,
-        value=15000.0,
-        step=500.0,
-        format="%.2f"
-    )
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ◉
+            </div>
+
+            <div class="input-card-title">
+                Outstanding Debt
+            </div>
+
+            <div class="input-card-subtitle">
+                Total remaining loan and credit debt
+            </div>
+            """
+        )
+
+        outstanding_debt = st.number_input(
+            "Outstanding Debt",
+            min_value=0.0,
+            max_value=1_000_000_000.0,
+            value=15000.0,
+            step=500.0,
+            format="%.2f",
+            label_visibility="collapsed"
+        )
 
 
 with financial_col5:
 
-    monthly_balance = st.number_input(
-        "Monthly Balance",
-        min_value=0.0,
-        max_value=1_000_000_000.0,
-        value=40000.0,
-        step=500.0,
-        format="%.2f"
-    )
+    with st.container(border=True):
+
+        render_html(
+            """
+            <div class="input-card-icon">
+                ◐
+            </div>
+
+            <div class="input-card-title">
+                Monthly Balance
+            </div>
+
+            <div class="input-card-subtitle">
+                Your available monthly financial balance
+            </div>
+            """
+        )
+
+        monthly_balance = st.number_input(
+            "Monthly Balance",
+            min_value=0.0,
+            max_value=1_000_000_000.0,
+            value=40000.0,
+            step=500.0,
+            format="%.2f",
+            label_visibility="collapsed"
+        )
 
 
 with financial_col6:
 
-    render_html(
-        """
-        <div style="
-            margin-top:30px;
-            min-height:145px;
-            padding:24px;
-            border-radius:18px;
-            border:1px solid rgba(120,140,180,0.14);
-            background:#0D1421;
-        ">
+    with st.container(border=True):
 
-            <div style="
-                color:#E8ECF4;
-                font-size:16px;
-                font-weight:700;
-            ">
-                Model Input
+        render_html(
+            """
+            <div class="model-input-card">
+
+                <div class="input-card-icon">
+                    ✦
+                </div>
+
+                <div class="input-card-title">
+                    Model Input
+                </div>
+
+                <div class="input-card-subtitle">
+                    These seven customer-facing attributes
+                    are exactly the features used by the
+                    trained Extra Trees model.
+                </div>
+
+                <div class="model-input-list">
+                    Age · Occupation · Annual Income<br>
+                    Delayed Payments · Monthly EMI<br>
+                    Outstanding Debt · Monthly Balance
+                </div>
+
             </div>
-
-            <div style="
-                margin-top:20px;
-                color:#7F8BA1;
-                font-size:13px;
-                line-height:1.65;
-            ">
-                These seven customer-facing attributes
-                are exactly the features used by the
-                trained Extra Trees model.
-            </div>
-
-        </div>
-        """
-    )
-
-
-st.markdown("<br>", unsafe_allow_html=True)
+            """
+        )
 
 
 # ============================================================
 # ANALYSE BUTTON
 # ============================================================
+
+st.markdown(
+    "<br><br>",
+    unsafe_allow_html=True
+)
+
 
 analyse = st.button(
     "Analyse My Credit Profile",
