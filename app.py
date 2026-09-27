@@ -636,13 +636,51 @@ with tb_c1:
 with tb_c2:
     currency = st.radio(
         "Currency Scale",
-        options=["USD ($)", "INR (₹)"],
+        options=["INR (₹)", "USD ($)"],
         index=0,
         horizontal=True,
-        help="USD uses Kaggle benchmark scales. INR normalizes values with 1:83 purchasing parity."
+        help="INR (₹) normalizes values with 1:83 purchasing parity. USD ($) uses Kaggle benchmark scales."
     )
     is_inr = "INR" in currency
     curr_sym = "₹" if is_inr else "$"
+
+    # Synchronize preset numbers when switching currency scale
+    if "current_currency" not in st.session_state:
+        st.session_state["current_currency"] = currency
+    elif st.session_state["current_currency"] != currency:
+        st.session_state["current_currency"] = currency
+        preset = st.session_state.get("selected_preset", "balanced")
+        if preset == "prime":
+            st.session_state["form_vals"] = {
+                "age": 38, "occupation": "Engineer",
+                "income": 5000000.0 if is_inr else 65000.0,
+                "delayed": 0,
+                "emi": 2500.0 if is_inr else 35.0,
+                "debt": 25000.0 if is_inr else 350.0,
+                "balance": 50000.0 if is_inr else 600.0,
+            }
+        elif preset == "high_risk":
+            st.session_state["form_vals"] = {
+                "age": 25, "occupation": "Teacher",
+                "income": 1500000.0 if is_inr else 20000.0,
+                "delayed": 22,
+                "emi": 7500.0 if is_inr else 90.0,
+                "debt": 110000.0 if is_inr else 1300.0,
+                "balance": 8000.0 if is_inr else 100.0,
+            }
+        else:
+            st.session_state["form_vals"] = {
+                "age": 32, "occupation": "Developer",
+                "income": 3000000.0 if is_inr else 40000.0,
+                "delayed": 5,
+                "emi": 3500.0 if is_inr else 45.0,
+                "debt": 60000.0 if is_inr else 750.0,
+                "balance": 30000.0 if is_inr else 350.0,
+            }
+        if "result" in st.session_state:
+            del st.session_state["result"]
+        st.rerun()
+
 with tb_c3:
     decision_mode = st.radio(
         "Decision Policy",
@@ -669,11 +707,11 @@ if "selected_preset" not in st.session_state:
 if "form_vals" not in st.session_state:
     st.session_state["form_vals"] = {
         "age": 32, "occupation": "Developer",
-        "income": 40000.0 if not is_inr else 3000000.0,
+        "income": 3000000.0 if is_inr else 40000.0,
         "delayed": 5,
-        "emi": 45.0 if not is_inr else 3500.0,
-        "debt": 750.0 if not is_inr else 60000.0,
-        "balance": 350.0 if not is_inr else 30000.0,
+        "emi": 3500.0 if is_inr else 45.0,
+        "debt": 60000.0 if is_inr else 750.0,
+        "balance": 30000.0 if is_inr else 350.0,
     }
 
 active_preset = st.session_state.get("selected_preset", "balanced")
