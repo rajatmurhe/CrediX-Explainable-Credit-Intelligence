@@ -433,6 +433,7 @@ html, body, [class*="css"] {
 h1,h2,h3,h4 { color: #0F172A !important; letter-spacing: -0.3px; }
 p, label, .stMarkdown p { color: #475569 !important; }
 
+/* ── NUMBER INPUTS (Clean modern input, no ugly stepper clutter) ── */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none !important; margin: 0 !important; }
 input[type="number"] { -moz-appearance: textfield !important; }
@@ -441,7 +442,7 @@ div[data-testid="stNumberInput"] input {
     background: #FFFFFF !important; color: #0F172A !important;
     border: 1.5px solid #D1D5DB !important; border-radius: 8px !important;
     min-height: 44px !important; font-size: 15px !important; font-weight: 600 !important;
-    padding: 8px 12px !important;
+    padding: 10px 14px !important;
     transition: border-color 0.15s, box-shadow 0.15s;
 }
 div[data-testid="stNumberInput"] input:focus {
@@ -449,13 +450,8 @@ div[data-testid="stNumberInput"] input:focus {
     box-shadow: 0 0 0 3px rgba(37,99,235,0.14) !important;
 }
 div[data-testid="stNumberInput"] button {
-    background: #F9FAFB !important; color: #6B7280 !important;
-    border: 1.5px solid #E5E7EB !important; border-radius: 6px !important;
-    width: 28px !important; min-height: 28px !important; max-height: 28px !important;
-    font-size: 13px !important; font-weight: 700 !important;
-    padding: 0 !important; margin: 2px !important; cursor: pointer !important;
+    display: none !important;
 }
-div[data-testid="stNumberInput"] button:hover { background: #E5E7EB !important; color: #111827 !important; }
 
 div[data-testid="stSelectbox"] > div > div,
 div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
@@ -473,6 +469,88 @@ div[data-testid="stWidgetLabel"] label {
     text-transform: uppercase !important; letter-spacing: 0.5px !important;
 }
 
+/* ── 1-CLICK BENCHMARK BUTTONS (Regular st.button) ── */
+/* Unselected (Secondary) Button: Crisp white card with subtle border */
+.stButton > button,
+button[kind="secondary"],
+[data-testid="baseButton-secondary"],
+[data-testid="stBaseButton-secondary"] {
+    background-color: #FFFFFF !important;
+    background: #FFFFFF !important;
+    color: #334155 !important;
+    -webkit-text-fill-color: #334155 !important;
+    border: 1.5px solid #CBD5E1 !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    min-height: 42px !important;
+    padding: 8px 16px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+}
+
+.stButton > button:hover,
+button[kind="secondary"]:hover,
+[data-testid="baseButton-secondary"]:hover,
+[data-testid="stBaseButton-secondary"]:hover {
+    background-color: #F8FAFC !important;
+    background: #F8FAFC !important;
+    border-color: #94A3B8 !important;
+    color: #0F172A !important;
+    -webkit-text-fill-color: #0F172A !important;
+}
+
+.stButton > button p,
+button[kind="secondary"] p,
+[data-testid="baseButton-secondary"] p,
+[data-testid="stBaseButton-secondary"] p {
+    color: #334155 !important;
+    -webkit-text-fill-color: #334155 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+}
+
+/* Selected / Highlighted (Primary) Button: Vibrant royal blue card with glow */
+.stButton > button[kind="primary"],
+button[kind="primary"],
+[data-testid="baseButton-primary"],
+[data-testid="stBaseButton-primary"] {
+    background-color: #2563EB !important;
+    background: #2563EB !important;
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    border: 1.5px solid #1D4ED8 !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    min-height: 42px !important;
+    padding: 8px 16px !important;
+    box-shadow: 0 4px 14px rgba(37,99,235,0.35) !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
+}
+
+.stButton > button[kind="primary"]:hover,
+button[kind="primary"]:hover,
+[data-testid="baseButton-primary"]:hover,
+[data-testid="stBaseButton-primary"]:hover {
+    background-color: #1D4ED8 !important;
+    background: #1D4ED8 !important;
+    border-color: #1E40AF !important;
+}
+
+.stButton > button[kind="primary"] p,
+button[kind="primary"] p,
+[data-testid="baseButton-primary"] p,
+[data-testid="stBaseButton-primary"] p {
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+}
+
+/* ── FORM SUBMIT BUTTONS ── */
 [data-testid="stFormSubmitButton"] button,
 [data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"] {
     background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
@@ -583,15 +661,28 @@ st.html("""<div style="font-size:11px;font-weight:800;color:#64748B;text-transfo
 p_col1, p_col2, p_col3, p_col4 = st.columns([1, 1, 1, 2])
 
 # Session state initialization for presets
+if "selected_preset" not in st.session_state:
+    st.session_state["selected_preset"] = "balanced"
+
 if "form_vals" not in st.session_state:
     st.session_state["form_vals"] = {
-        "age": 35, "occupation": "Engineer",
-        "income": 50000.0, "delayed": 1,
-        "emi": 40.0, "debt": 400.0, "balance": 450.0,
+        "age": 32, "occupation": "Developer",
+        "income": 40000.0 if not is_inr else 3000000.0,
+        "delayed": 5,
+        "emi": 45.0 if not is_inr else 3500.0,
+        "debt": 750.0 if not is_inr else 60000.0,
+        "balance": 350.0 if not is_inr else 30000.0,
     }
 
+active_preset = st.session_state.get("selected_preset", "balanced")
+is_prime = active_preset == "prime"
+is_balanced = active_preset == "balanced"
+is_high_risk = active_preset == "high_risk"
+
 with p_col1:
-    if st.button("🌟 Prime (Tier 1)", use_container_width=True):
+    prime_label = "🌟 Prime (Tier 1)  ✓" if is_prime else "🌟 Prime (Tier 1)"
+    if st.button(prime_label, type="primary" if is_prime else "secondary", use_container_width=True, key="btn_prime"):
+        st.session_state["selected_preset"] = "prime"
         st.session_state["form_vals"] = {
             "age": 38, "occupation": "Engineer",
             "income": 65000.0 if not is_inr else 5000000.0,
@@ -600,10 +691,14 @@ with p_col1:
             "debt": 350.0 if not is_inr else 25000.0,
             "balance": 600.0 if not is_inr else 50000.0,
         }
+        if "result" in st.session_state:
+            del st.session_state["result"]
         st.rerun()
 
 with p_col2:
-    if st.button("⚖️ Balanced (Tier 2)", use_container_width=True):
+    bal_label = "⚖️ Balanced (Tier 2)  ✓" if is_balanced else "⚖️ Balanced (Tier 2)"
+    if st.button(bal_label, type="primary" if is_balanced else "secondary", use_container_width=True, key="btn_balanced"):
+        st.session_state["selected_preset"] = "balanced"
         st.session_state["form_vals"] = {
             "age": 32, "occupation": "Developer",
             "income": 40000.0 if not is_inr else 3000000.0,
@@ -612,10 +707,14 @@ with p_col2:
             "debt": 750.0 if not is_inr else 60000.0,
             "balance": 350.0 if not is_inr else 30000.0,
         }
+        if "result" in st.session_state:
+            del st.session_state["result"]
         st.rerun()
 
 with p_col3:
-    if st.button("⚠️ High-Risk (Tier 3)", use_container_width=True):
+    risk_label = "⚠️ High-Risk (Tier 3)  ✓" if is_high_risk else "⚠️ High-Risk (Tier 3)"
+    if st.button(risk_label, type="primary" if is_high_risk else "secondary", use_container_width=True, key="btn_high_risk"):
+        st.session_state["selected_preset"] = "high_risk"
         st.session_state["form_vals"] = {
             "age": 25, "occupation": "Teacher",
             "income": 20000.0 if not is_inr else 1500000.0,
@@ -624,6 +723,8 @@ with p_col3:
             "debt": 1300.0 if not is_inr else 110000.0,
             "balance": 100.0 if not is_inr else 8000.0,
         }
+        if "result" in st.session_state:
+            del st.session_state["result"]
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────
