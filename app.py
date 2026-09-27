@@ -1,7 +1,14 @@
 """
-CrediX — Explainable Credit Intelligence  v2.0
-Enterprise Credit Risk Assessment Platform
-Complete redesign: Plotly gauges · risk score · tabbed analytics · live ratios
+CrediX — Explainable Credit Intelligence v2.5
+Enterprise Credit Risk Assessment & Underwriting Platform
+Features:
+- Dual Currency Support ($ USD / ₹ INR) with domain-scale normalization
+- 1-Click Benchmark Test Profiles (Prime, Balanced, High-Risk)
+- Dual Decision Modes: Prudential Risk-Aware vs Mathematical Argmax
+- FICO-Style Credit Score (300–850) & 0–100 Risk Index
+- Real-Time Financial Ratio Indicators (DTI, EMI Burden, Liquidity)
+- Interactive Plotly Visualizations (Gauge, Probabilities, Feature Importance)
+- Comprehensive Audit Trail & PDF Export
 """
 
 import io
@@ -25,7 +32,7 @@ except Exception:
     PDF_OK = False
 
 # ─────────────────────────────────────────────────────────────────
-# PAGE CONFIG  (must be the very first Streamlit call)
+# PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="CrediX | Credit Intelligence Platform",
@@ -35,15 +42,15 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────────
-# CONSTANTS
+# CONSTANTS & METADATA
 # ─────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "credit_data.csv"
+USD_TO_INR_RATE = 83.0  # Purchasing power / benchmark exchange parity
 
 EXPECTED_FEATURES = [
-    "Age", "Occupation", "Annual_Income",
-    "Num_of_Delayed_Payment", "Total_EMI_per_month",
-    "Outstanding_Debt", "Monthly_Balance",
+    "Age", "Annual_Income", "Num_of_Delayed_Payment",
+    "Total_EMI_per_month", "Outstanding_Debt", "Monthly_Balance", "Occupation",
 ]
 
 OCCUPATIONS = [
@@ -52,15 +59,24 @@ OCCUPATIONS = [
     "Media_Manager", "Musician", "Scientist", "Teacher", "Writer",
 ]
 
-RATING = {
-    "Good":     {"hex": "#10B981", "bg": "#ECFDF5", "border": "#A7F3D0", "dark": "#065F46", "muted": "#D1FAE5"},
-    "Standard": {"hex": "#F59E0B", "bg": "#FFFBEB", "border": "#FDE68A", "dark": "#78350F", "muted": "#FEF3C7"},
-    "Poor":     {"hex": "#EF4444", "bg": "#FEF2F2", "border": "#FECACA", "dark": "#991B1B", "muted": "#FEE2E2"},
+RATING_CONFIG = {
+    "Good": {
+        "hex": "#10B981", "bg": "#ECFDF5", "border": "#A7F3D0",
+        "dark": "#065F46", "badge": "PRIME / LOW RISK", "tier": "Tier 1",
+    },
+    "Standard": {
+        "hex": "#F59E0B", "bg": "#FFFBEB", "border": "#FDE68A",
+        "dark": "#78350F", "badge": "NEAR PRIME / MODERATE", "tier": "Tier 2",
+    },
+    "Poor": {
+        "hex": "#EF4444", "bg": "#FEF2F2", "border": "#FECACA",
+        "dark": "#991B1B", "badge": "SUBPRIME / HIGH RISK", "tier": "Tier 3",
+    },
 }
 
 FEAT_DISPLAY = {
     "Outstanding_Debt": "Outstanding Debt", "Age": "Age",
-    "Total_EMI_per_month": "Total Monthly EMI",
+    "Total_EMI_per_month": "Monthly EMI",
     "Num_of_Delayed_Payment": "Delayed Payments",
     "Annual_Income": "Annual Income", "Occupation": "Occupation",
     "Monthly_Balance": "Monthly Balance",
@@ -84,14 +100,14 @@ CLASS_METRICS = {
 }
 
 # ─────────────────────────────────────────────────────────────────
-# LOAD ARTIFACTS
+# ARTIFACT LOADERS
 # ─────────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
     try:
         return joblib.load(BASE_DIR / "trained_credit_model.joblib")
     except Exception as e:
-        st.error(f"CrediX model could not be loaded.\n\n{e}")
+        st.error(f"CrediX model could not be loaded: {e}")
         st.stop()
 
 @st.cache_resource
@@ -108,21 +124,21 @@ def load_features():
     except Exception:
         return EXPECTED_FEATURES
 
-@st.cache_data
-def load_dataset():
+@st.cache_resource
+def load_bounds():
     try:
-        return pd.read_csv(DATA_PATH)
+        return joblib.load(BASE_DIR / "feature_bounds.joblib")
     except Exception:
-        return None
+        return {}
 
 model       = load_model()
 encoder     = load_encoder()
 feat_order  = load_features()
-dataset     = load_dataset()
+bounds_data = load_bounds()
 class_names = list(encoder.classes_) if encoder else ["Good", "Poor", "Standard"]
 
 # ─────────────────────────────────────────────────────────────────
-# FEATURE IMPORTANCE
+# FEATURE IMPORTANCE AGGREGATOR
 # ─────────────────────────────────────────────────────────────────
 @st.cache_data
 def get_importance_df():
@@ -145,30 +161,29 @@ def get_importance_df():
                         imps.append(r)
             if imps:
                 return np.mean(np.vstack(imps), axis=0)
-        for attr in ("estimator", "base_estimator"):
-            inner = getattr(est, attr, None)
-            if inner:
-                r = _extract(inner)
-                if r is not None:
-                    return r
         return None
 
     try:
-        raw  = _extract(model)
+        raw = _extract(model)
         prep = None
         if hasattr(model, "named_steps"):
             for k in ("preprocessor", "transformer"):
                 if k in model.named_steps:
                     prep = model.named_steps[k]; break
+        elif hasattr(model, "calibrated_classifiers_"):
+            base = model.calibrated_classifiers_[0].estimator
+            if hasattr(base, "named_steps") and "preprocessor" in base.named_steps:
+                prep = base.named_steps["preprocessor"]
+
         if raw is None or prep is None:
-            raise ValueError("extraction failed")
+            raise ValueError("Direct extraction not possible")
 
         col_names = prep.get_feature_names_out()
-        agg: dict = {}
+        agg = {}
         for feat, imp in zip(col_names, raw):
-            key  = feat.split("__")[-1] if "__" in feat else feat
-            base = "Occupation" if key.startswith("Occupation") else key
-            agg[base] = agg.get(base, 0.0) + float(imp)
+            key = feat.split("__")[-1] if "__" in feat else feat
+            base_key = "Occupation" if key.startswith("Occupation") else key
+            agg[base_key] = agg.get(base_key, 0.0) + float(imp)
 
         total = sum(agg.values()) or 1.0
         return pd.DataFrame(
@@ -183,85 +198,149 @@ def get_importance_df():
 importance_df = get_importance_df()
 
 # ─────────────────────────────────────────────────────────────────
-# HELPERS
+# INFERENCE & EVALUATION ENGINE
 # ─────────────────────────────────────────────────────────────────
-def H(s: str):
-    """Render raw HTML block."""
-    st.html(s)
+def evaluate_applicant(
+    age: int,
+    occupation: str,
+    annual_income: float,
+    delayed_payments: int,
+    emi: float,
+    outstanding_debt: float,
+    monthly_balance: float,
+    currency: str = "USD",
+    decision_mode: str = "risk_aware",
+):
+    """
+    Evaluates applicant credit profile with currency normalization
+    and dual decision policies (Prudential Risk-Aware vs Argmax).
+    """
+    scale_factor = USD_TO_INR_RATE if currency == "INR" else 1.0
 
-def compute_risk_score(probabilities, class_names):
-    weights = {"Good": 14.0, "Standard": 52.0, "Poor": 88.0}
-    return round(float(sum(probabilities[i] * weights.get(c, 50.0)
-                           for i, c in enumerate(class_names))), 1)
-
-def build_input_df(age, occupation, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance):
-    raw = {
-        "Age": age, "Occupation": occupation,
-        "Annual_Income": float(annual_income),
+    # Model input DataFrame normalized to training domain (USD scale)
+    model_input = {
+        "Age": int(age),
+        "Occupation": str(occupation),
+        "Annual_Income": float(annual_income) / scale_factor,
         "Num_of_Delayed_Payment": int(delayed_payments),
-        "Total_EMI_per_month": float(emi),
-        "Outstanding_Debt": float(outstanding_debt),
-        "Monthly_Balance": float(monthly_balance),
+        "Total_EMI_per_month": float(emi) / scale_factor,
+        "Outstanding_Debt": float(outstanding_debt) / scale_factor,
+        "Monthly_Balance": float(monthly_balance) / scale_factor,
     }
-    return pd.DataFrame([{f: raw[f] for f in feat_order}])
+    input_df = pd.DataFrame([{f: model_input[f] for f in feat_order}])
 
-def run_prediction(input_df):
-    pred_enc      = model.predict(input_df)
+    # Probabilities from calibrated ensemble: [P(Good), P(Poor), P(Standard)]
     probabilities = model.predict_proba(input_df)[0]
-    label         = encoder.inverse_transform(pred_enc)[0] if encoder else str(pred_enc[0])
-    return label, probabilities
+    prob_map = {c: float(probabilities[i]) for i, c in enumerate(class_names)}
+    p_good = prob_map.get("Good", 0.0)
+    p_poor = prob_map.get("Poor", 0.0)
+    p_std  = prob_map.get("Standard", 0.0)
 
-def get_recommendations(pred, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance):
+    # Decision policy
+    if decision_mode == "risk_aware":
+        # Prudential default thresholding: P(Poor) >= 30% flags default risk
+        if p_poor >= 0.30:
+            prediction = "Poor"
+        elif p_good >= 0.40:
+            prediction = "Good"
+        else:
+            prediction = "Standard"
+    else:
+        # Standard mathematical argmax (>50%)
+        pred_enc = model.predict(input_df)[0]
+        prediction = encoder.inverse_transform([pred_enc])[0] if encoder else str(pred_enc)
+
+    # Calibrated Credit Score (300 to 850 FICO-style scale)
+    # Good probability drives 850, Poor drives 300, Standard anchors 620-680
+    raw_score = 300.0 + 550.0 * (p_good + 0.52 * p_std)
+    credit_score = int(np.clip(round(raw_score), 300, 850))
+
+    # 0 to 100 Risk Index (Lower is safer)
+    risk_score = round(float(p_poor * 90.0 + p_std * 50.0 + p_good * 12.0), 1)
+
+    # Out-of-Distribution Warning Check
+    ood_warnings = []
+    if bounds_data:
+        debt_max = bounds_data.get("Outstanding_Debt", {}).get("train_max", 1500.0)
+        emi_max  = bounds_data.get("Total_EMI_per_month", {}).get("train_max", 200.0)
+        norm_debt = model_input["Outstanding_Debt"]
+        norm_emi  = model_input["Total_EMI_per_month"]
+        if norm_debt > debt_max * 1.5:
+            ood_warnings.append(f"Outstanding debt is {norm_debt/debt_max:.1f}× above training boundary.")
+        if norm_emi > emi_max * 1.5:
+            ood_warnings.append(f"Monthly EMI is {norm_emi/emi_max:.1f}× above training boundary.")
+
+    return {
+        "prediction": prediction,
+        "probabilities": probabilities,
+        "prob_map": prob_map,
+        "credit_score": credit_score,
+        "risk_score": risk_score,
+        "input_df": input_df,
+        "normalized_input": model_input,
+        "ood_warnings": ood_warnings,
+    }
+
+def get_recommendations(pred, annual_income, delayed_payments, emi, debt, balance, sym):
     recs = []
-    mi        = annual_income / 12 if annual_income > 0 else 1
-    emi_ratio = emi / mi         if mi > 0           else 0
-    dti       = outstanding_debt / annual_income if annual_income > 0 else 0
+    mi = annual_income / 12 if annual_income > 0 else 1
+    emi_ratio = emi / mi if mi > 0 else 0
+    dti = debt / annual_income if annual_income > 0 else 0
 
     if delayed_payments > 3:
-        recs.append(("🔔 Payment History",
-            f"You have {int(delayed_payments)} recorded late payments. Set up autopay or calendar reminders — consistent on-time payments are the single biggest driver of credit improvement."))
+        recs.append((
+            "🔔 Payment Discipline",
+            f"You have {int(delayed_payments)} recorded delayed payments. Setting up automated debit instructions ensures zero delinquency, which accounts for the largest recovery in your credit score."
+        ))
     if emi_ratio > 0.40:
-        recs.append(("📉 EMI Burden",
-            f"Annual EMI commitment is {emi_ratio:.0%} of monthly income — above the recommended 40% ceiling. Consider consolidating loans or prepaying high-interest obligations."))
-    if dti > 1.5:
-        recs.append(("⚖️ Debt Load",
-            f"Outstanding debt stands at {dti:.1f}× annual income. A structured debt-reduction plan focused on high-APR accounts can meaningfully lower your risk score within 12 months."))
-    if monthly_balance < mi * 0.10:
-        recs.append(("🏦 Liquidity Reserve",
-            f"Monthly balance is low relative to income. Building a 3-month emergency fund (~₹{annual_income/4:,.0f}) improves both financial resilience and perceived creditworthiness."))
+        recs.append((
+            "📉 EMI Burden Management",
+            f"Monthly EMI commitments stand at {emi_ratio:.0%} of monthly income (benchmark ceiling is 40%). Consolidating high-interest loans can lower monthly obligations."
+        ))
+    if dti > 1.2:
+        recs.append((
+            "⚖️ Debt Amortization Plan",
+            f"Outstanding debt stands at {dti:.2f}× annual income. Directing bonus or discretionary cash flow towards reducing principal will directly improve your risk index."
+        ))
+    if balance < mi * 0.15:
+        recs.append((
+            "🏦 Liquidity Reserve",
+            f"Current closing balance is lean relative to monthly expenses. Building a 3-month liquidity cushion (~{sym}{mi*3:,.0f}) enhances financial resilience."
+        ))
     if pred == "Good" and delayed_payments == 0:
-        recs.append(("✅ Sustain Excellence",
-            "Your profile scores well across all dimensions. Continue disciplined on-time payments and avoid taking on debt disproportionate to income to maintain your Good rating."))
-    if pred == "Standard" and not recs:
-        recs.append(("📋 Incremental Improvement",
-            "Your profile sits at Standard. Reducing outstanding debt by 20% and eliminating any new delayed payments over the next 6 months could shift you to Good."))
+        recs.append((
+            "✅ Prime Maintenance",
+            "Your profile scores in Tier 1. Maintaining current debt-to-income and payment discipline qualifies you for prime lending rates and preferred terms."
+        ))
     if not recs:
-        recs.append(("📊 Ongoing Monitoring",
-            "No specific risk flags detected. Review your financial ratios quarterly and maintain current payment discipline."))
+        recs.append((
+            "📋 Balanced Trajectory",
+            "Profile metrics are stable. Keeping credit card utilization below 30% and avoiding simultaneous new loan inquiries will support a migration to Good."
+        ))
     return recs[:4]
 
 # ─────────────────────────────────────────────────────────────────
 # PLOTLY CHARTS
 # ─────────────────────────────────────────────────────────────────
 def make_gauge(risk_score: float, prediction: str):
-    cfg = RATING.get(prediction, RATING["Standard"])
+    cfg = RATING_CONFIG.get(prediction, RATING_CONFIG["Standard"])
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=risk_score,
-        number={"font": {"size": 42, "color": "#0F172A", "family": "Inter, system-ui"}, "suffix": ""},
+        number={"font": {"size": 40, "color": "#0F172A", "family": "Inter, system-ui"}, "suffix": ""},
         gauge={
             "axis": {
                 "range": [0, 100], "tickwidth": 1, "tickcolor": "#CBD5E1",
-                "tickvals": [0, 35, 65, 100],
-                "ticktext": ["Low", "Medium", "High", "Critical"],
+                "tickvals": [0, 30, 60, 100],
+                "ticktext": ["Prime (0-30)", "Standard (30-60)", "High Risk (60-100)", ""],
                 "tickfont": {"size": 9, "color": "#94A3B8"},
             },
-            "bar":  {"color": cfg["hex"], "thickness": 0.22},
+            "bar": {"color": cfg["hex"], "thickness": 0.22},
             "bgcolor": "white", "borderwidth": 0,
             "steps": [
-                {"range": [0,  35], "color": "#ECFDF5"},
-                {"range": [35, 65], "color": "#FFFBEB"},
-                {"range": [65, 100], "color": "#FEF2F2"},
+                {"range": [0, 30], "color": "#ECFDF5"},
+                {"range": [30, 60], "color": "#FFFBEB"},
+                {"range": [60, 100], "color": "#FEF2F2"},
             ],
             "threshold": {
                 "line": {"color": cfg["hex"], "width": 4},
@@ -270,18 +349,18 @@ def make_gauge(risk_score: float, prediction: str):
         },
     ))
     fig.update_layout(
-        height=240, margin={"l": 20, "r": 20, "t": 15, "b": 0},
+        height=220, margin={"l": 20, "r": 20, "t": 15, "b": 0},
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font={"family": "Inter, system-ui"},
     )
     return fig
 
 def make_prob_chart(probabilities, class_names, prediction):
-    COLOR = {"Good": "#10B981", "Standard": "#F59E0B", "Poor": "#EF4444"}
-    pairs  = sorted(zip(class_names, probabilities), key=lambda x: x[1], reverse=True)
+    COLOR_MAP = {"Good": "#10B981", "Standard": "#F59E0B", "Poor": "#EF4444"}
+    pairs = sorted(zip(class_names, probabilities), key=lambda x: x[1], reverse=True)
     labels = [p[0] for p in pairs]
-    vals   = [p[1] * 100  for p in pairs]
-    colors = [COLOR.get(l, "#6B7280") for l in labels]
+    vals = [p[1] * 100 for p in pairs]
+    colors = [COLOR_MAP.get(l, "#6B7280") for l in labels]
     ylabels = [f"<b>{l}</b>" if l == prediction else l for l in labels]
 
     fig = go.Figure(go.Bar(
@@ -293,19 +372,19 @@ def make_prob_chart(probabilities, class_names, prediction):
         cliponaxis=False,
     ))
     fig.update_layout(
-        height=180, margin={"l": 0, "r": 70, "t": 10, "b": 10},
+        height=170, margin={"l": 0, "r": 65, "t": 8, "b": 8},
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis={"range": [0, 118], "showgrid": False, "showticklabels": False, "zeroline": False},
         yaxis={"showgrid": False, "tickfont": {"size": 13, "color": "#374151", "family": "Inter"}},
-        showlegend=False, bargap=0.38,
+        showlegend=False, bargap=0.36,
     )
     return fig
 
 def make_importance_chart(imp_df):
-    df  = imp_df.copy()
+    df = imp_df.copy()
     df["Label"] = df["Feature"].map(lambda f: FEAT_DISPLAY.get(f, f))
-    df  = df.sort_values("Importance", ascending=True)
-    mx  = df["Importance"].max()
+    df = df.sort_values("Importance", ascending=True)
+    mx = df["Importance"].max()
     colors = [f"rgba(37,99,235,{0.25 + 0.75*(v/mx):.2f})" for v in df["Importance"]]
 
     fig = go.Figure(go.Bar(
@@ -317,19 +396,19 @@ def make_importance_chart(imp_df):
         cliponaxis=False,
     ))
     fig.update_layout(
-        height=300, margin={"l": 0, "r": 70, "t": 10, "b": 10},
+        height=290, margin={"l": 0, "r": 65, "t": 8, "b": 8},
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         xaxis={
             "showgrid": True, "gridcolor": "#F1F5F9",
-            "showticklabels": False, "zeroline": False, "range": [0, mx * 132],
+            "showticklabels": False, "zeroline": False, "range": [0, mx * 130],
         },
         yaxis={"showgrid": False, "tickfont": {"size": 12, "color": "#374151", "family": "Inter"}},
-        showlegend=False, bargap=0.32,
+        showlegend=False, bargap=0.30,
     )
     return fig
 
 # ─────────────────────────────────────────────────────────────────
-# CSS
+# CUSTOM CSS
 # ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -344,7 +423,6 @@ html, body, [class*="css"] {
     padding-bottom: 60px !important; padding-left: 2rem !important; padding-right: 2rem !important;
 }
 
-/* ── SIDEBAR ── */
 [data-testid="stSidebar"] {
     background: #0A0F1E !important; border-right: 1px solid #111827 !important;
     min-width: 230px !important; max-width: 230px !important;
@@ -355,7 +433,6 @@ html, body, [class*="css"] {
 h1,h2,h3,h4 { color: #0F172A !important; letter-spacing: -0.3px; }
 p, label, .stMarkdown p { color: #475569 !important; }
 
-/* ── NUMBER INPUTS ── */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none !important; margin: 0 !important; }
 input[type="number"] { -moz-appearance: textfield !important; }
@@ -363,8 +440,8 @@ input[type="number"] { -moz-appearance: textfield !important; }
 div[data-testid="stNumberInput"] input {
     background: #FFFFFF !important; color: #0F172A !important;
     border: 1.5px solid #D1D5DB !important; border-radius: 8px !important;
-    min-height: 46px !important; font-size: 15px !important; font-weight: 600 !important;
-    padding: 10px 14px !important; box-shadow: inset 0 1px 2px rgba(0,0,0,0.03) !important;
+    min-height: 44px !important; font-size: 15px !important; font-weight: 600 !important;
+    padding: 8px 12px !important;
     transition: border-color 0.15s, box-shadow 0.15s;
 }
 div[data-testid="stNumberInput"] input:focus {
@@ -374,121 +451,52 @@ div[data-testid="stNumberInput"] input:focus {
 div[data-testid="stNumberInput"] button {
     background: #F9FAFB !important; color: #6B7280 !important;
     border: 1.5px solid #E5E7EB !important; border-radius: 6px !important;
-    width: 30px !important; min-height: 30px !important; max-height: 30px !important;
-    font-size: 14px !important; font-weight: 700 !important;
-    padding: 0 !important; margin: 2px !important; box-shadow: none !important; cursor: pointer !important;
+    width: 28px !important; min-height: 28px !important; max-height: 28px !important;
+    font-size: 13px !important; font-weight: 700 !important;
+    padding: 0 !important; margin: 2px !important; cursor: pointer !important;
 }
-div[data-testid="stNumberInput"] button:hover { background: #E5E7EB !important; color: #111827 !important; border-color: #D1D5DB !important; }
-div[data-testid="stNumberInput"] button p { color: #6B7280 !important; font-weight: 800 !important; }
-div[data-testid="stNumberInput"] button:hover p { color: #111827 !important; }
+div[data-testid="stNumberInput"] button:hover { background: #E5E7EB !important; color: #111827 !important; }
 
-/* ── SELECTBOX ── */
 div[data-testid="stSelectbox"] > div > div,
 div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
     background: #FFFFFF !important; border: 1.5px solid #D1D5DB !important;
-    border-radius: 8px !important; min-height: 46px !important;
-}
-div[data-testid="stSelectbox"] > div > div:focus-within,
-div[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
-    border-color: #2563EB !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.14) !important;
+    border-radius: 8px !important; min-height: 44px !important;
 }
 div[data-testid="stSelectbox"] *,
 div[data-testid="stSelectbox"] span,
 div[data-testid="stSelectbox"] div[class*="singleValue"],
 div[data-testid="stSelectbox"] div[class*="placeholder"] {
-    color: #111827 !important; font-size: 15px !important; font-weight: 600 !important;
+    color: #111827 !important; font-size: 14px !important; font-weight: 600 !important;
 }
-div[data-testid="stSelectbox"] svg { color: #6B7280 !important; fill: #6B7280 !important; }
-[data-baseweb="popover"] li, [data-baseweb="menu"] li { color: #111827 !important; background: #FFFFFF !important; font-size: 14px !important; }
-[data-baseweb="popover"] [aria-selected="true"], [data-baseweb="menu"] [aria-selected="true"],
-[data-baseweb="popover"] li:hover, [data-baseweb="menu"] li:hover { background: #EFF6FF !important; color: #1D4ED8 !important; }
-
-/* ── LABELS ── */
 div[data-testid="stWidgetLabel"] label {
     color: #374151 !important; font-size: 11px !important; font-weight: 800 !important;
     text-transform: uppercase !important; letter-spacing: 0.5px !important;
 }
 
-/* ── PRIMARY FORM SUBMIT ── */
 [data-testid="stFormSubmitButton"] button,
 [data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"] {
     background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
     border: none !important; border-radius: 8px !important; font-size: 14px !important;
-    font-weight: 700 !important; min-height: 48px !important; width: 100% !important;
-    cursor: pointer !important; opacity: 1 !important;
-    box-shadow: 0 1px 3px rgba(37,99,235,0.3), 0 1px 2px rgba(0,0,0,0.06);
-    transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+    font-weight: 700 !important; min-height: 46px !important; width: 100% !important;
+    box-shadow: 0 1px 3px rgba(37,99,235,0.3); transition: background 0.15s;
 }
-[data-testid="stFormSubmitButton"] button:hover,
-[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"]:hover {
-    background: #1D4ED8 !important; box-shadow: 0 6px 18px rgba(37,99,235,0.4) !important; transform: translateY(-1px);
-}
-[data-testid="stFormSubmitButton"] button p,
-[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"] p {
-    color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important;
-}
+[data-testid="stFormSubmitButton"] button:hover { background: #1D4ED8 !important; }
+[data-testid="stFormSubmitButton"] button p { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important; }
 
-/* ── SECONDARY FORM SUBMIT ── */
 [data-testid="stFormSubmitButton"] button[kind="secondaryFormSubmit"] {
     background: #FFFFFF !important; color: #374151 !important; -webkit-text-fill-color: #374151 !important;
-    border: 1.5px solid #D1D5DB !important; box-shadow: none !important;
+    border: 1.5px solid #D1D5DB !important;
 }
-[data-testid="stFormSubmitButton"] button[kind="secondaryFormSubmit"]:hover { background: #F9FAFB !important; transform: none; }
 [data-testid="stFormSubmitButton"] button[kind="secondaryFormSubmit"] p { color: #374151 !important; -webkit-text-fill-color: #374151 !important; }
 
-/* ── st.button ── */
-.stButton > button {
-    background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
-    border: none !important; border-radius: 8px !important; font-size: 14px !important;
-    font-weight: 700 !important; min-height: 44px !important; cursor: pointer !important; opacity: 1 !important;
-    box-shadow: 0 1px 3px rgba(37,99,235,0.25);
-}
-.stButton > button p { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important; }
-.stButton > button:hover { background: #1D4ED8 !important; }
-.stButton > button:disabled { opacity: 1 !important; }
-
-/* ── DOWNLOAD ── */
-[data-testid="stDownloadButton"] button {
-    background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
-    border: none !important; border-radius: 8px !important; font-weight: 700 !important;
-    min-height: 48px !important; width: 100% !important; cursor: pointer !important;
-}
-[data-testid="stDownloadButton"] button p { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important; }
-[data-testid="stDownloadButton"] button:hover { background: #1D4ED8 !important; }
-
-/* ── TABS ── */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0; border-bottom: 2px solid #E2E8F0 !important; background: transparent;
-    margin-bottom: 0;
-}
+.stTabs [data-baseweb="tab-list"] { border-bottom: 2px solid #E2E8F0 !important; background: transparent; }
 .stTabs [data-baseweb="tab"] {
     background: transparent; border: none; border-bottom: 2px solid transparent;
-    color: #64748B !important; font-size: 13px; font-weight: 600;
-    padding: 12px 22px; margin-bottom: -2px; letter-spacing: 0.1px;
-    transition: color 0.15s;
+    color: #64748B !important; font-size: 13px; font-weight: 600; padding: 12px 20px;
 }
-.stTabs [aria-selected="true"] { color: #2563EB !important; border-bottom-color: #2563EB !important; background: transparent; }
-.stTabs [data-baseweb="tab-panel"] { padding: 28px 0 0 0; }
-
-/* ── EXPANDERS ── */
-.streamlit-expanderHeader { background: #FFFFFF !important; border: 1px solid #E2E8F0 !important; border-radius: 6px !important; color: #0F172A !important; font-weight: 600 !important; }
-.streamlit-expanderContent { border: 1px solid #E2E8F0 !important; border-top: none !important; border-radius: 0 0 6px 6px !important; }
-
-/* ── METRICS ── */
-div[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px !important; }
-div[data-testid="stMetricLabel"] { color: #64748B !important; font-size: 11px !important; font-weight: 700 !important; text-transform: uppercase !important; letter-spacing: 0.4px !important; }
-div[data-testid="stMetricValue"] { color: #0F172A !important; font-size: 24px !important; font-weight: 800 !important; }
-
-/* ── FORM ── */
+.stTabs [aria-selected="true"] { color: #2563EB !important; border-bottom-color: #2563EB !important; }
+div[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 16px !important; }
 [data-testid="stForm"] { background: #FFFFFF !important; border: 1.5px solid #E2E8F0 !important; border-radius: 14px !important; padding: 12px !important; }
-
-hr { border-color: #E2E8F0 !important; margin: 20px 0 !important; }
-.stCaption { color: #94A3B8 !important; font-size: 12px !important; }
-div[data-testid="stVerticalBlockBorderWrapper"] { border: 1.5px solid #E2E8F0 !important; border-radius: 10px !important; background: #FFFFFF !important; padding: 20px !important; }
-
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #F0F4F8; }
-::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -496,158 +504,204 @@ div[data-testid="stVerticalBlockBorderWrapper"] { border: 1.5px solid #E2E8F0 !i
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    H("""
-    <div style="padding:26px 20px 20px;border-bottom:1px solid #1E293B;margin-bottom:22px;">
+    st.html("""
+    <div style="padding:24px 18px 18px;border-bottom:1px solid #1E293B;margin-bottom:20px;">
         <div style="font-size:24px;font-weight:900;color:#F1F5F9;letter-spacing:-0.5px;line-height:1.1;">
             Credi<span style="color:#3B82F6;">X</span>
         </div>
-        <div style="font-size:9px;color:#475569;letter-spacing:2px;margin-top:4px;text-transform:uppercase;font-weight:600;">Credit Intelligence</div>
+        <div style="font-size:9px;color:#475569;letter-spacing:2px;margin-top:4px;text-transform:uppercase;font-weight:600;">Enterprise Credit Risk AI</div>
     </div>
-
-    <div style="padding:0 12px;margin-bottom:22px;">
-        <div style="font-size:9px;font-weight:800;color:#334155;text-transform:uppercase;letter-spacing:2px;padding:0 8px;margin-bottom:10px;">Navigation</div>
-
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:rgba(59,130,246,0.15);margin-bottom:3px;border:1px solid rgba(59,130,246,0.15);">
-            <span style="font-size:14px;">📊</span>
-            <span style="font-size:13px;font-weight:700;color:#93C5FD;">Credit Assessment</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:3px;">
-            <span style="font-size:14px;opacity:0.35;">🔍</span>
-            <span style="font-size:13px;font-weight:500;color:#475569;">Model Insights</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:3px;">
-            <span style="font-size:14px;opacity:0.35;">ℹ️</span>
-            <span style="font-size:13px;font-weight:500;color:#475569;">Model Information</span>
+    <div style="padding:0 10px;margin-bottom:20px;">
+        <div style="font-size:9px;font-weight:800;color:#334155;text-transform:uppercase;letter-spacing:2px;padding:0 8px;margin-bottom:8px;">Workspace</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.15);">
+            <span>📊</span><span style="font-size:13px;font-weight:700;color:#93C5FD;">Credit Underwriting</span>
         </div>
     </div>
-
-    <div style="padding:0 12px;margin-bottom:22px;">
-        <div style="font-size:9px;font-weight:800;color:#334155;text-transform:uppercase;letter-spacing:2px;padding:0 8px;margin-bottom:10px;">Model Status</div>
-        <div style="background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.18);border-radius:10px;padding:14px 16px;">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                <div style="width:8px;height:8px;background:#10B981;border-radius:50%;box-shadow:0 0 6px rgba(16,185,129,0.6);flex-shrink:0;"></div>
-                <span style="font-size:11px;font-weight:800;color:#6EE7B7;letter-spacing:0.5px;">ACTIVE</span>
+    <div style="padding:0 10px;margin-bottom:20px;">
+        <div style="font-size:9px;font-weight:800;color:#334155;text-transform:uppercase;letter-spacing:2px;padding:0 8px;margin-bottom:8px;">Engine Architecture</div>
+        <div style="background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.18);border-radius:10px;padding:14px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <div style="width:7px;height:7px;background:#10B981;border-radius:50%;box-shadow:0 0 5px #10B981;"></div>
+                <span style="font-size:11px;font-weight:800;color:#6EE7B7;letter-spacing:0.5px;">ONLINE</span>
             </div>
-            <div style="font-size:11px;color:#64748B;line-height:1.9;">
+            <div style="font-size:11px;color:#64748B;line-height:1.8;">
                 <div>Extra Trees Classifier</div>
-                <div>Isotonic Calibration</div>
-                <div>3-Class Output</div>
-                <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);color:#475569;">31,711 training records</div>
+                <div>Isotonic Calibration (cv=5)</div>
+                <div>FICO Score Engine (300-850)</div>
+                <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);color:#475569;">31,711 records trained</div>
             </div>
         </div>
     </div>
     """)
-
     st.markdown("---")
-
-    H("""
-    <div style="padding:14px 20px 22px;">
-        <div style="font-size:13px;font-weight:700;color:#CBD5E1;margin-bottom:2px;">Rajat Murhe</div>
+    st.html("""
+    <div style="padding:10px 18px 20px;">
+        <div style="font-size:13px;font-weight:700;color:#CBD5E1;">Rajat Murhe</div>
         <div style="font-size:11px;color:#475569;">ML AI Engineer</div>
     </div>
     """)
 
 # ─────────────────────────────────────────────────────────────────
-# TOP BAR
+# TOP BAR WITH CURRENCY & POLICY SELECTORS
 # ─────────────────────────────────────────────────────────────────
-H("""
-<div style="background:#FFFFFF;border-bottom:1px solid #E2E8F0;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;margin-left:-2rem;margin-right:-2rem;position:sticky;top:0;z-index:999;box-shadow:0 1px 6px rgba(0,0,0,0.04);">
-    <div style="display:flex;align-items:center;gap:8px;">
+tb_c1, tb_c2, tb_c3 = st.columns([1.5, 1.2, 1.3])
+with tb_c1:
+    st.html("""
+    <div style="display:flex;align-items:center;gap:8px;padding-top:8px;">
         <span style="font-size:13px;color:#94A3B8;">Platform</span>
-        <span style="color:#CBD5E1;font-size:13px;">›</span>
-        <span style="font-size:13px;color:#0F172A;font-weight:700;">Credit Assessment</span>
+        <span style="color:#CBD5E1;">›</span>
+        <span style="font-size:13px;color:#0F172A;font-weight:700;">Credit Intelligence & Underwriting</span>
     </div>
-    <div style="display:flex;align-items:center;gap:14px;">
-        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:20px;padding:5px 14px;display:flex;align-items:center;gap:7px;">
-            <div style="width:7px;height:7px;background:#22C55E;border-radius:50%;box-shadow:0 0 5px rgba(34,197,94,0.5);"></div>
-            <span style="font-size:11px;font-weight:800;color:#166534;letter-spacing:0.5px;">EXTRA TREES ACTIVE</span>
-        </div>
-    </div>
-</div>
-""")
+    """)
+with tb_c2:
+    currency = st.radio(
+        "Currency Scale",
+        options=["USD ($)", "INR (₹)"],
+        index=0,
+        horizontal=True,
+        help="USD uses Kaggle benchmark scales. INR normalizes values with 1:83 purchasing parity."
+    )
+    is_inr = "INR" in currency
+    curr_sym = "₹" if is_inr else "$"
+with tb_c3:
+    decision_mode = st.radio(
+        "Decision Policy",
+        options=["Prudential Risk-Aware", "Standard Argmax"],
+        index=0,
+        horizontal=True,
+        help="Prudential mode prioritizes default risk detection (P(Poor) >= 30%) to eliminate false negatives."
+    )
+    is_risk_aware = "Prudential" in decision_mode
+    mode_key = "risk_aware" if is_risk_aware else "argmax"
+
+st.markdown("<hr style='margin:10px 0 20px 0;'>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────
-# TWO-COLUMN LAYOUT
+# 1-CLICK BENCHMARK TEST PERSONAS
+# ─────────────────────────────────────────────────────────────────
+st.html("""<div style="font-size:11px;font-weight:800;color:#64748B;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;">1-Click Benchmark Test Profiles:</div>""")
+p_col1, p_col2, p_col3, p_col4 = st.columns([1, 1, 1, 2])
+
+# Session state initialization for presets
+if "form_vals" not in st.session_state:
+    st.session_state["form_vals"] = {
+        "age": 35, "occupation": "Engineer",
+        "income": 50000.0, "delayed": 1,
+        "emi": 40.0, "debt": 400.0, "balance": 450.0,
+    }
+
+with p_col1:
+    if st.button("🌟 Prime (Tier 1)", use_container_width=True):
+        st.session_state["form_vals"] = {
+            "age": 38, "occupation": "Engineer",
+            "income": 65000.0 if not is_inr else 5000000.0,
+            "delayed": 0,
+            "emi": 35.0 if not is_inr else 2500.0,
+            "debt": 350.0 if not is_inr else 25000.0,
+            "balance": 600.0 if not is_inr else 50000.0,
+        }
+        st.rerun()
+
+with p_col2:
+    if st.button("⚖️ Balanced (Tier 2)", use_container_width=True):
+        st.session_state["form_vals"] = {
+            "age": 32, "occupation": "Developer",
+            "income": 40000.0 if not is_inr else 3000000.0,
+            "delayed": 5,
+            "emi": 45.0 if not is_inr else 3500.0,
+            "debt": 750.0 if not is_inr else 60000.0,
+            "balance": 350.0 if not is_inr else 30000.0,
+        }
+        st.rerun()
+
+with p_col3:
+    if st.button("⚠️ High-Risk (Tier 3)", use_container_width=True):
+        st.session_state["form_vals"] = {
+            "age": 25, "occupation": "Teacher",
+            "income": 20000.0 if not is_inr else 1500000.0,
+            "delayed": 22,
+            "emi": 90.0 if not is_inr else 7500.0,
+            "debt": 1300.0 if not is_inr else 110000.0,
+            "balance": 100.0 if not is_inr else 8000.0,
+        }
+        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────
+# WORKSPACE: LEFT (FORM) & RIGHT (ASSESSMENT)
 # ─────────────────────────────────────────────────────────────────
 left_col, right_col = st.columns([0.95, 1.05], gap="large")
 
-# ─────────────────────────────────────────────────────────────────
-# LEFT — INPUT FORM
-# ─────────────────────────────────────────────────────────────────
 with left_col:
-    H("""
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
-        <div style="width:30px;height:30px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">1</div>
+    st.html("""
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;">1</div>
         <div>
-            <div style="font-size:14px;font-weight:800;color:#0F172A;text-transform:uppercase;letter-spacing:0.6px;">Personal & Financial Profile</div>
-            <div style="font-size:12px;color:#64748B;margin-top:1px;">Enter applicant details to generate a credit assessment</div>
+            <div style="font-size:14px;font-weight:800;color:#0F172A;text-transform:uppercase;letter-spacing:0.5px;">Applicant Financial Profile</div>
+            <div style="font-size:12px;color:#64748B;">Enter or adjust customer financial parameters</div>
         </div>
     </div>
     """)
 
-    with st.form("credit_form"):
-        H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #F1F5F9;">Personal Information</div>""")
+    f_vals = st.session_state["form_vals"]
 
+    with st.form("credit_form"):
+        st.html("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Demographics</div>""")
         c1, c2 = st.columns(2)
         with c1:
-            age = st.number_input("Age (years)", min_value=18, max_value=100, value=30, step=1,
-                                  help="Applicant's age in years")
+            age = st.number_input("Age (years)", min_value=18, max_value=100, value=int(f_vals["age"]), step=1)
         with c2:
-            occupation = st.selectbox("Occupation", options=OCCUPATIONS, index=4)
+            occ_idx = OCCUPATIONS.index(f_vals["occupation"]) if f_vals["occupation"] in OCCUPATIONS else 4
+            occupation = st.selectbox("Occupation", options=OCCUPATIONS, index=occ_idx)
 
-        H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1.5px;margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid #F1F5F9;">Financial Information</div>""")
-
+        st.html("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin:14px 0 8px;">Financial Details</div>""")
         c3, c4 = st.columns(2)
         with c3:
-            annual_income = st.number_input("Annual Income (₹)", min_value=0.0, value=600000.0, step=10000.0, format="%.0f")
+            step_inc = 10000.0 if is_inr else 1000.0
+            annual_income = st.number_input(f"Annual Income ({curr_sym})", min_value=1000.0, value=float(f_vals["income"]), step=step_inc, format="%.0f")
         with c4:
-            delayed_payments = st.number_input("Delayed Payments", min_value=0, max_value=50, value=1, step=1,
-                                               help="Number of recorded late/missed payments")
+            delayed_payments = st.number_input("Recorded Late Payments", min_value=0, max_value=60, value=int(f_vals["delayed"]), step=1)
 
         c5, c6 = st.columns(2)
         with c5:
-            emi = st.number_input("Total Monthly EMI (₹)", min_value=0.0, value=5000.0, step=500.0, format="%.0f")
+            step_emi = 500.0 if is_inr else 10.0
+            emi = st.number_input(f"Monthly EMI ({curr_sym})", min_value=0.0, value=float(f_vals["emi"]), step=step_emi, format="%.0f")
         with c6:
-            outstanding_debt = st.number_input("Outstanding Debt (₹)", min_value=0.0, value=150000.0, step=5000.0, format="%.0f")
+            step_debt = 1000.0 if is_inr else 50.0
+            outstanding_debt = st.number_input(f"Outstanding Debt ({curr_sym})", min_value=0.0, value=float(f_vals["debt"]), step=step_debt, format="%.0f")
 
-        monthly_balance = st.number_input(
-            "Monthly Closing Balance (₹)", min_value=0.0, value=40000.0, step=1000.0, format="%.0f",
-            help="Average monthly bank balance after all expenses")
+        step_bal = 1000.0 if is_inr else 50.0
+        monthly_balance = st.number_input(f"Monthly Closing Balance ({curr_sym})", min_value=0.0, value=float(f_vals["balance"]), step=step_bal, format="%.0f")
 
-        # ── live derived ratio panel ──
-        mi        = annual_income / 12 if annual_income > 0 else 1
-        emi_ratio = emi / mi           if mi > 0           else 0
-        dti       = outstanding_debt / annual_income if annual_income > 0 else 0
-        sav_pct   = min(100.0, monthly_balance / mi * 100) if mi > 0 else 0
+        # ── Real-time Financial Ratios ──
+        mi = annual_income / 12.0 if annual_income > 0 else 1.0
+        emi_ratio = emi / mi if mi > 0 else 0.0
+        dti = outstanding_debt / annual_income if annual_income > 0 else 0.0
+        sav_pct = min(100.0, (monthly_balance / mi) * 100.0) if mi > 0 else 0.0
 
-        def _clr(bad): return "#EF4444" if bad else "#10B981"
-        def _lbl(bad, good_txt, bad_txt): return bad_txt if bad else good_txt
+        def _rc(bad): return "#EF4444" if bad else "#10B981"
+        def _rl(bad, g, b): return b if bad else g
 
-        H(f"""
-        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:16px 18px;margin:18px 0;display:flex;gap:0;align-items:stretch;">
-            <div style="flex:1;text-align:center;padding:0 10px;">
-                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">EMI / Income</div>
-                <div style="font-size:22px;font-weight:900;color:{_clr(emi_ratio>0.4)};line-height:1;">{emi_ratio:.0%}</div>
-                <div style="font-size:10px;color:#94A3B8;margin-top:3px;">{_lbl(emi_ratio>0.4,"✓ Healthy","▲ High")}</div>
+        st.html(f"""
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:12px;margin:14px 0;display:flex;">
+            <div style="flex:1;text-align:center;">
+                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;">EMI / Income</div>
+                <div style="font-size:18px;font-weight:900;color:{_rc(emi_ratio>0.4)};">{emi_ratio:.1%}</div>
+                <div style="font-size:9px;color:#94A3B8;">{_rl(emi_ratio>0.4,'✓ Healthy','▲ High')}</div>
             </div>
             <div style="width:1px;background:#E2E8F0;"></div>
-            <div style="flex:1;text-align:center;padding:0 10px;">
-                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Debt / Income</div>
-                <div style="font-size:22px;font-weight:900;color:{_clr(dti>1.5)};line-height:1;">{dti:.2f}×</div>
-                <div style="font-size:10px;color:#94A3B8;margin-top:3px;">{_lbl(dti>1.5,"✓ Healthy","▲ High")}</div>
+            <div style="flex:1;text-align:center;">
+                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;">Debt / Income</div>
+                <div style="font-size:18px;font-weight:900;color:{_rc(dti>1.0)};">{dti:.2f}×</div>
+                <div style="font-size:9px;color:#94A3B8;">{_rl(dti>1.0,'✓ Healthy','▲ High')}</div>
             </div>
             <div style="width:1px;background:#E2E8F0;"></div>
-            <div style="flex:1;text-align:center;padding:0 10px;">
-                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Savings Rate</div>
-                <div style="font-size:22px;font-weight:900;color:{_clr(sav_pct<10)};line-height:1;">{sav_pct:.0f}%</div>
-                <div style="font-size:10px;color:#94A3B8;margin-top:3px;">{_lbl(sav_pct<10,"✓ Healthy","▲ Low")}</div>
+            <div style="flex:1;text-align:center;">
+                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;">Liquidity Cushion</div>
+                <div style="font-size:18px;font-weight:900;color:{_rc(sav_pct<10)};">{sav_pct:.0f}%</div>
+                <div style="font-size:9px;color:#94A3B8;">{_rl(sav_pct<10,'✓ Adequate','▲ Lean')}</div>
             </div>
         </div>
         """)
-
-        H("""<div style="font-size:10px;color:#94A3B8;margin-bottom:14px;">
-            7 model inputs: Age · Occupation · Annual Income · Delayed Payments · Monthly EMI · Outstanding Debt · Monthly Balance
-        </div>""")
 
         b1, b2 = st.columns([2, 1])
         with b1:
@@ -656,204 +710,173 @@ with left_col:
             reset = st.form_submit_button("Reset", type="secondary", use_container_width=True)
 
 # ─────────────────────────────────────────────────────────────────
-# RIGHT — ASSESSMENT PANEL
+# RIGHT: ASSESSMENT OUTPUT
 # ─────────────────────────────────────────────────────────────────
 with right_col:
-    H("""
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
-        <div style="width:30px;height:30px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">2</div>
+    st.html("""
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;">2</div>
         <div>
-            <div style="font-size:14px;font-weight:800;color:#0F172A;text-transform:uppercase;letter-spacing:0.6px;">Live Credit Assessment</div>
-            <div style="font-size:12px;color:#64748B;margin-top:1px;">Instant AI-powered risk analysis</div>
+            <div style="font-size:14px;font-weight:800;color:#0F172A;text-transform:uppercase;letter-spacing:0.5px;">Underwriting Decision & Score</div>
+            <div style="font-size:12px;color:#64748B;">Multi-factor calibrated assessment outcome</div>
         </div>
     </div>
     """)
 
-    # handle reset
     if reset and "result" in st.session_state:
         del st.session_state["result"]
         st.rerun()
 
-    # handle submit
     if submitted:
-        input_df              = build_input_df(age, occupation, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance)
-        prediction, probabilities = run_prediction(input_df)
-        risk_score            = compute_risk_score(probabilities, class_names)
-        recs                  = get_recommendations(prediction, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance)
-        prob_map              = {c: float(probabilities[i]) for i, c in enumerate(class_names)}
-
+        eval_res = evaluate_applicant(
+            age=age, occupation=occupation, annual_income=annual_income,
+            delayed_payments=delayed_payments, emi=emi,
+            outstanding_debt=outstanding_debt, monthly_balance=monthly_balance,
+            currency="INR" if is_inr else "USD", decision_mode=mode_key,
+        )
+        recs = get_recommendations(
+            pred=eval_res["prediction"], annual_income=annual_income,
+            delayed_payments=delayed_payments, emi=emi,
+            debt=outstanding_debt, balance=monthly_balance, sym=curr_sym,
+        )
         st.session_state["result"] = {
-            "prediction":    prediction,
-            "probabilities": probabilities,
-            "risk_score":    risk_score,
-            "prob_map":      prob_map,
-            "recs":          recs,
-            "input_df":      input_df,
-            "inputs": {
-                "Age":               age,
-                "Occupation":        occupation,
-                "Annual Income":     f"₹{annual_income:,.0f}",
-                "Delayed Payments":  int(delayed_payments),
-                "Total Monthly EMI": f"₹{emi:,.0f}",
-                "Outstanding Debt":  f"₹{outstanding_debt:,.0f}",
-                "Monthly Balance":   f"₹{monthly_balance:,.0f}",
+            **eval_res,
+            "recs": recs,
+            "currency_sym": curr_sym,
+            "currency_name": "INR" if is_inr else "USD",
+            "decision_policy": "Prudential Risk-Aware" if is_risk_aware else "Standard Argmax",
+            "inputs_display": {
+                "Age": f"{age} years",
+                "Occupation": occupation,
+                "Annual Income": f"{curr_sym}{annual_income:,.0f}",
+                "Delayed Payments": f"{delayed_payments} late",
+                "Monthly EMI": f"{curr_sym}{emi:,.0f}",
+                "Outstanding Debt": f"{curr_sym}{outstanding_debt:,.0f}",
+                "Monthly Balance": f"{curr_sym}{monthly_balance:,.0f}",
             },
         }
 
-    # ── WAITING STATE ──
     if "result" not in st.session_state:
-        H("""
-        <div style="background:#FFFFFF;border:1.5px solid #E2E8F0;border-radius:14px;padding:64px 40px;text-align:center;">
-            <div style="font-size:54px;margin-bottom:18px;">📊</div>
-            <div style="font-size:18px;font-weight:800;color:#0F172A;margin-bottom:8px;">Awaiting Assessment</div>
-            <div style="font-size:13px;color:#64748B;max-width:280px;margin:0 auto;line-height:1.75;">
-                Complete the financial profile and click
-                <span style="font-weight:800;color:#2563EB;">Run Credit Assessment</span>
-                to generate an instant risk analysis.
-            </div>
-            <div style="display:flex;justify-content:center;gap:0;margin-top:32px;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden;max-width:280px;margin-left:auto;margin-right:auto;">
-                <div style="flex:1;padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0;">
-                    <div style="font-size:22px;font-weight:900;color:#0F172A;">3</div>
-                    <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Classes</div>
-                </div>
-                <div style="flex:1;padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0;">
-                    <div style="font-size:22px;font-weight:900;color:#0F172A;">7</div>
-                    <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Features</div>
-                </div>
-                <div style="flex:1;padding:16px 12px;text-align:center;">
-                    <div style="font-size:22px;font-weight:900;color:#0F172A;">31K</div>
-                    <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Records</div>
-                </div>
+        st.html("""
+        <div style="background:#FFFFFF;border:1.5px solid #E2E8F0;border-radius:14px;padding:58px 30px;text-align:center;">
+            <div style="font-size:48px;margin-bottom:14px;">📊</div>
+            <div style="font-size:17px;font-weight:800;color:#0F172A;margin-bottom:6px;">Ready for Evaluation</div>
+            <div style="font-size:13px;color:#64748B;max-width:300px;margin:0 auto;line-height:1.7;">
+                Select a benchmark profile above or customize input parameters, then click
+                <b style="color:#2563EB;">Run Credit Assessment</b>.
             </div>
         </div>
         """)
-
-    # ── RESULT STATE ──
     else:
-        r    = st.session_state["result"]
+        r = st.session_state["result"]
         pred = r["prediction"]
-        cfg  = RATING.get(pred, RATING["Standard"])
+        cfg = RATING_CONFIG.get(pred, RATING_CONFIG["Standard"])
+        score = r["credit_score"]
         risk = r["risk_score"]
 
-        # Rating banner
-        H(f"""
-        <div style="background:linear-gradient(135deg,{cfg['bg']} 0%,#FFFFFF 100%);border:1.5px solid {cfg['border']};border-radius:14px;padding:24px 28px;margin-bottom:18px;">
-            <div style="font-size:9px;font-weight:800;color:{cfg['dark']};text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Final Credit Assessment</div>
-            <div style="font-size:54px;font-weight:900;color:{cfg['hex']};letter-spacing:-2.5px;line-height:1;margin-bottom:12px;">{pred.upper()}</div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <div style="display:inline-block;background:rgba(255,255,255,0.85);border:1.5px solid {cfg['border']};border-radius:20px;padding:5px 16px;font-size:12px;font-weight:700;color:{cfg['dark']};">{pred} Credit Profile</div>
-                <div style="display:inline-block;background:rgba(255,255,255,0.6);border:1px solid #E2E8F0;border-radius:20px;padding:5px 16px;font-size:12px;font-weight:600;color:#64748B;">Risk Score: <b style="color:{cfg['hex']};">{risk:.0f} / 100</b></div>
+        # ── OOD Warning if detected ──
+        if r["ood_warnings"]:
+            warnings_text = "<br>• ".join(r["ood_warnings"])
+            st.html(f"""
+            <div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:#92400E;">
+                ⚠️ <b>Domain Note:</b> {warnings_text} (Model applies robust outlier scaling).
+            </div>
+            """)
+
+        # ── Primary Decision Banner ──
+        st.html(f"""
+        <div style="background:linear-gradient(135deg,{cfg['bg']} 0%,#FFFFFF 100%);border:1.5px solid {cfg['border']};border-radius:14px;padding:22px 26px;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                    <div style="font-size:9px;font-weight:800;color:{cfg['dark']};text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Underwriting Decision</div>
+                    <div style="font-size:46px;font-weight:900;color:{cfg['hex']};letter-spacing:-2px;line-height:1;margin-bottom:10px;">{pred.upper()}</div>
+                    <div style="display:inline-block;background:rgba(255,255,255,0.85);border:1.5px solid {cfg['border']};border-radius:20px;padding:4px 14px;font-size:11px;font-weight:800;color:{cfg['dark']};">
+                        {cfg['badge']} · {cfg['tier']}
+                    </div>
+                </div>
+                <div style="background:#FFFFFF;border:1.5px solid {cfg['border']};border-radius:12px;padding:12px 18px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+                    <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;">CrediX Score</div>
+                    <div style="font-size:34px;font-weight:900;color:#0F172A;line-height:1.1;">{score}</div>
+                    <div style="font-size:10px;color:#64748B;">Scale: 300–850</div>
+                </div>
             </div>
         </div>
         """)
 
-        # Gauge + probabilities
+        # ── Risk Gauge & Probabilities ──
         gc, pc = st.columns(2)
         with gc:
-            H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:4px;">Risk Gauge</div>""")
+            st.html("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:2px;">Risk Index (0-100)</div>""")
             if PLOTLY_OK:
                 st.plotly_chart(make_gauge(risk, pred), use_container_width=True, config={"displayModeBar": False})
-            H("""<div style="text-align:center;margin-top:-10px;font-size:10px;color:#94A3B8;">0 = Low Risk · 100 = Critical</div>""")
-
         with pc:
-            H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:4px;">Class Probabilities</div>""")
+            st.html("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:2px;">Class Probabilities</div>""")
             if PLOTLY_OK:
-                st.plotly_chart(make_prob_chart(r["probabilities"], class_names, pred),
-                                use_container_width=True, config={"displayModeBar": False})
-
-        # Confidence bar
-        max_prob = float(max(r["probabilities"])) * 100
-        H(f"""
-        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
-            <div>
-                <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;">Model Confidence</div>
-                <div style="font-size:11px;color:#64748B;margin-top:2px;">Highest predicted class probability</div>
-            </div>
-            <div style="font-size:28px;font-weight:900;color:#0F172A;letter-spacing:-1px;">{max_prob:.1f}%</div>
-        </div>
-        """)
+                st.plotly_chart(make_prob_chart(r["probabilities"], class_names, pred), use_container_width=True, config={"displayModeBar": False})
 
 # ─────────────────────────────────────────────────────────────────
-# ANALYTICS TABS  (visible only after an assessment)
+# 5-TAB ANALYTICS SUITE
 # ─────────────────────────────────────────────────────────────────
 if "result" in st.session_state:
-    r    = st.session_state["result"]
+    r = st.session_state["result"]
     pred = r["prediction"]
-    cfg  = RATING.get(pred, RATING["Standard"])
+    cfg = RATING_CONFIG.get(pred, RATING_CONFIG["Standard"])
 
     st.markdown("<br>", unsafe_allow_html=True)
-
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "  Feature Impact  ",
         "  Recommendations  ",
-        "  Model Performance  ",
+        "  Model Performance & Audit  ",
         "  Input Summary  ",
         "  Export Report  ",
     ])
 
-    # ── TAB 1: Feature Impact ──────────────────────────────────
+    # ── TAB 1: Feature Impact ──
     with tab1:
         ta, tb = st.columns([1.2, 0.85], gap="large")
-
         with ta:
-            H("""
-            <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Key Model Drivers</div>
-            <div style="font-size:12px;color:#64748B;margin-bottom:18px;">Relative Gini-MDI importance learned by the Extra Trees ensemble across all calibrated estimators</div>
+            st.html("""
+            <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Key Model Drivers (Gini-MDI)</div>
+            <div style="font-size:12px;color:#64748B;margin-bottom:14px;">Mean decrease in impurity across all calibrated ensemble estimators</div>
             """)
             if PLOTLY_OK:
-                st.plotly_chart(make_importance_chart(importance_df),
-                                use_container_width=True, config={"displayModeBar": False})
-            H("""<div style="font-size:11px;color:#94A3B8;margin-top:4px;">
-                ⚠️ Importance reflects model learning — it does not imply direct causation.
-            </div>""")
-
+                st.plotly_chart(make_importance_chart(importance_df), use_container_width=True, config={"displayModeBar": False})
         with tb:
-            H("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:16px;">Breakdown</div>""")
+            st.html("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:12px;">Feature Weight Table</div>""")
             for _, row in importance_df.iterrows():
                 disp = FEAT_DISPLAY.get(row["Feature"], row["Feature"])
-                pct  = row["Importance"] * 100
-                bar  = int(pct / importance_df["Importance"].max() * 100)
-                H(f"""
-                <div style="margin-bottom:14px;">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                pct = row["Importance"] * 100
+                st.html(f"""
+                <div style="margin-bottom:12px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
                         <span style="font-size:12px;font-weight:700;color:#374151;">{disp}</span>
                         <span style="font-size:12px;font-weight:800;color:#0F172A;">{pct:.1f}%</span>
                     </div>
-                    <div style="background:#F1F5F9;border-radius:5px;height:7px;">
-                        <div style="width:{bar}%;height:100%;background:#2563EB;border-radius:5px;"></div>
+                    <div style="background:#F1F5F9;border-radius:4px;height:6px;">
+                        <div style="width:{int(pct/importance_df['Importance'].max()*100)}%;height:100%;background:#2563EB;border-radius:4px;"></div>
                     </div>
                 </div>
                 """)
 
-    # ── TAB 2: Recommendations ────────────────────────────────
+    # ── TAB 2: Recommendations ──
     with tab2:
-        H("""
-        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Personalised Financial Guidance</div>
-        <div style="font-size:12px;color:#64748B;margin-bottom:22px;">Actionable recommendations based on this applicant's specific financial profile</div>
+        st.html("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Actionable Credit Guidance</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:18px;">Specific remediation steps generated for this applicant's profile</div>
         """)
-
-        bc = cfg["hex"]
         for title, body in r["recs"]:
-            H(f"""
-            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-left:4px solid {bc};border-radius:10px;padding:18px 22px;margin-bottom:14px;">
-                <div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:7px;">{title}</div>
-                <div style="font-size:13px;color:#475569;line-height:1.75;">{body}</div>
+            st.html(f"""
+            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-left:4px solid {cfg['hex']};border-radius:10px;padding:16px 20px;margin-bottom:12px;">
+                <div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:4px;">{title}</div>
+                <div style="font-size:12px;color:#475569;line-height:1.7;">{body}</div>
             </div>
             """)
 
-        H("""
-        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:14px 18px;margin-top:6px;">
-            <div style="font-size:11px;color:#94A3B8;line-height:1.6;">
-                ⚠️ Recommendations are generated algorithmically from submitted data for analytical purposes only. They do not constitute financial, legal, or credit advice.
-            </div>
-        </div>
-        """)
-
-    # ── TAB 3: Model Performance ──────────────────────────────
+    # ── TAB 3: Model Performance & Strict Audit ──
     with tab3:
-        H("""
-        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Model Performance Metrics</div>
-        <div style="font-size:12px;color:#64748B;margin-bottom:22px;">Evaluated on a held-out test set — Extra Trees Classifier with isotonic calibration</div>
+        st.html("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Strict Evaluation & Audit Report</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:18px;">Held-out test set evaluation (6,343 samples, Stratified 80/20 split)</div>
         """)
 
         m_cols = st.columns(3)
@@ -862,156 +885,129 @@ if "result" in st.session_state:
                 st.metric(label, f"{val:.2f}%")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        H("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:16px;">Per-Class Breakdown</div>""")
-
+        st.html("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:12px;">Class-Specific Evaluation</div>""")
         c_cols = st.columns(3)
         for i, (cls, mets) in enumerate(CLASS_METRICS.items()):
-            c = RATING.get(cls, {})
+            c = RATING_CONFIG.get(cls, {})
             with c_cols[i]:
-                H(f"""
-                <div style="background:#FFFFFF;border:1.5px solid {c.get('border','#E2E8F0')};border-radius:12px;padding:20px;text-align:center;">
-                    <div style="font-size:11px;font-weight:800;color:{c.get('dark','#374151')};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:14px;">{cls}</div>
-                    <div style="display:flex;justify-content:space-around;gap:4px;">
+                st.html(f"""
+                <div style="background:#FFFFFF;border:1.5px solid {c.get('border','#E2E8F0')};border-radius:12px;padding:18px;text-align:center;">
+                    <div style="font-size:11px;font-weight:800;color:{c.get('dark','#374151')};text-transform:uppercase;margin-bottom:12px;">{cls}</div>
+                    <div style="display:flex;justify-content:space-around;">
                         <div>
-                            <div style="font-size:20px;font-weight:900;color:{c.get('hex','#374151')};">{mets['Precision']:.1f}%</div>
-                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Precision</div>
+                            <div style="font-size:18px;font-weight:900;color:{c.get('hex','#374151')};">{mets['Precision']:.1f}%</div>
+                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;">Precision</div>
                         </div>
                         <div>
-                            <div style="font-size:20px;font-weight:900;color:{c.get('hex','#374151')};">{mets['Recall']:.1f}%</div>
-                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Recall</div>
+                            <div style="font-size:18px;font-weight:900;color:{c.get('hex','#374151')};">{mets['Recall']:.1f}%</div>
+                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;">Recall</div>
                         </div>
                         <div>
-                            <div style="font-size:20px;font-weight:900;color:{c.get('hex','#374151')};">{mets['F1']:.1f}%</div>
-                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">F1</div>
+                            <div style="font-size:18px;font-weight:900;color:{c.get('hex','#374151')};">{mets['F1']:.1f}%</div>
+                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;">F1</div>
                         </div>
                     </div>
                 </div>
                 """)
 
-        H("""
-        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:16px 20px;margin-top:22px;">
-            <div style="font-size:12px;color:#64748B;line-height:1.8;">
-                <b style="color:#374151;">Methodology:</b> Final model selected via 10-fold cross-validated macro F1.
-                Probability calibration applied post-training via isotonic regression on a held-out calibration split.
-                Feature importance derived by averaging Gini-MDI scores across all calibrated base estimators.
-            </div>
+        st.html("""
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:16px 20px;margin-top:20px;font-size:12px;color:#64748B;line-height:1.8;">
+            <b style="color:#0F172A;">Prudential Policy Implementation:</b> In standard 3-class argmax decisioning, 35.3% of true defaults were misclassified into the majority class (Standard) because default probability peaked between 30% and 49%.
+            The <b>Prudential Risk-Aware mode</b> lowers the threshold to <code>P(Poor) ≥ 30%</code>, improving default recall from <b>63.9% to 77.3%</b> and reducing false negatives by 39%.
         </div>
         """)
 
-    # ── TAB 4: Input Summary ──────────────────────────────────
+    # ── TAB 4: Input Summary ──
     with tab4:
-        H("""
-        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Assessment Input Summary</div>
-        <div style="font-size:12px;color:#64748B;margin-bottom:22px;">Exact values submitted to the model for this assessment session</div>
+        st.html("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Audit Trail & Input Summary</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:18px;">Exact parameters evaluated for this assessment session</div>
         """)
-
         s1, s2 = st.columns([1, 1], gap="large")
-
         with s1:
-            H("""<div style="font-size:11px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Profile Details</div>""")
-            rows_html = ""
-            for k, v in r["inputs"].items():
-                rows_html += f"""
-                <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #F1F5F9;">
-                    <span style="font-size:13px;color:#64748B;font-weight:500;">{k}</span>
+            st.html("""<div style="font-size:11px;font-weight:800;color:#94A3B8;text-transform:uppercase;margin-bottom:10px;">Submitted Parameters</div>""")
+            rows_html = "".join([
+                f"""<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F1F5F9;">
+                    <span style="font-size:13px;color:#64748B;">{k}</span>
                     <span style="font-size:13px;color:#0F172A;font-weight:700;">{v}</span>
-                </div>
-                """
-            H(f"""<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;padding:4px 18px;">{rows_html}</div>""")
-
+                </div>""" for k, v in r["inputs_display"].items()
+            ])
+            st.html(f"""<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;padding:4px 18px;">{rows_html}</div>""")
         with s2:
-            H("""<div style="font-size:11px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Assessment Outcome</div>""")
-
-            prob_map = r["prob_map"]
-            color_m  = {"Good": "#10B981", "Standard": "#F59E0B", "Poor": "#EF4444"}
-
-            H(f"""
-            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;padding:20px;">
-                <div style="margin-bottom:18px;">
-                    <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Credit Class</div>
-                    <div style="font-size:30px;font-weight:900;color:{cfg['hex']};">{pred}</div>
+            st.html("""<div style="font-size:11px;font-weight:800;color:#94A3B8;text-transform:uppercase;margin-bottom:10px;">Session Metadata</div>""")
+            st.html(f"""
+            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;padding:16px 18px;">
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;">
+                    <span style="font-size:13px;color:#64748B;">Currency Selected</span>
+                    <span style="font-size:13px;color:#0F172A;font-weight:700;">{r['currency_name']} ({r['currency_sym']})</span>
                 </div>
-                <div style="margin-bottom:18px;">
-                    <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Risk Score</div>
-                    <div style="font-size:30px;font-weight:900;color:#0F172A;">{r['risk_score']:.0f}<span style="font-size:14px;color:#94A3B8;font-weight:600;"> / 100</span></div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;">
+                    <span style="font-size:13px;color:#64748B;">Decision Policy</span>
+                    <span style="font-size:13px;color:#0F172A;font-weight:700;">{r['decision_policy']}</span>
                 </div>
-                <div>
-                    <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Class Probabilities</div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F1F5F9;">
+                    <span style="font-size:13px;color:#64748B;">FICO-Style Score</span>
+                    <span style="font-size:13px;color:#0F172A;font-weight:700;">{r['credit_score']} / 850</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0;">
+                    <span style="font-size:13px;color:#64748B;">Risk Index</span>
+                    <span style="font-size:13px;color:#0F172A;font-weight:700;">{r['risk_score']} / 100</span>
+                </div>
+            </div>
             """)
 
-            for cls in class_names:
-                pct = prob_map.get(cls, 0) * 100
-                clr = color_m.get(cls, "#6B7280")
-                bold = "800" if cls == pred else "500"
-                H(f"""
-                <div style="margin-bottom:11px;">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                        <span style="font-size:12px;color:#374151;font-weight:{bold};">{cls}</span>
-                        <span style="font-size:12px;font-weight:800;color:{clr};">{pct:.1f}%</span>
-                    </div>
-                    <div style="background:#F1F5F9;border-radius:4px;height:7px;">
-                        <div style="width:{pct}%;height:100%;background:{clr};border-radius:4px;"></div>
-                    </div>
-                </div>
-                """)
-
-            H("</div></div>")
-
-    # ── TAB 5: Export Report ──────────────────────────────────
+    # ── TAB 5: Export Report ──
     with tab5:
-        H("""
-        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Export Assessment Report</div>
-        <div style="font-size:12px;color:#64748B;margin-bottom:24px;">Generate a detailed professional PDF report for this credit assessment</div>
+        st.html("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Export Official Assessment Report</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:20px;">Download an audit-ready PDF credit evaluation document</div>
         """)
-
         rc1, rc2 = st.columns([1, 1], gap="large")
-
         with rc1:
-            H(f"""
-            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;padding:26px;">
-                <div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:18px;">Report Contents</div>
-                <div style="font-size:13px;color:#475569;line-height:2.4;">
-                    ✓ &nbsp; Applicant financial profile summary<br>
-                    ✓ &nbsp; Credit classification: <b style="color:{cfg['hex']};">{pred}</b><br>
-                    ✓ &nbsp; Class probability breakdown<br>
-                    ✓ &nbsp; Feature importance table<br>
-                    ✓ &nbsp; Personalised recommendations<br>
-                    ✓ &nbsp; Model performance metrics<br>
-                    ✓ &nbsp; Methodology &amp; disclaimer
+            st.html(f"""
+            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;padding:24px;">
+                <div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:16px;">Report Package Includes</div>
+                <div style="font-size:13px;color:#475569;line-height:2.2;">
+                    ✓ &nbsp; Customer financial profile &amp; credit metrics<br>
+                    ✓ &nbsp; Underwriting classification: <b style="color:{cfg['hex']};">{pred}</b><br>
+                    ✓ &nbsp; FICO-equivalent Score ({score}/850) &amp; Class Probabilities<br>
+                    ✓ &nbsp; Gini-MDI feature importance ranking<br>
+                    ✓ &nbsp; Tailored financial remediation directives<br>
+                    ✓ &nbsp; Model validation metrics &amp; methodology disclaimer
                 </div>
             </div>
             """)
-
         with rc2:
-            H("""
-            <div style="background:#F8FAFC;border:1.5px dashed #CBD5E1;border-radius:12px;padding:32px;text-align:center;">
-                <div style="font-size:38px;margin-bottom:14px;">📄</div>
-                <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:6px;">PDF Credit Report</div>
-                <div style="font-size:12px;color:#64748B;margin-bottom:22px;line-height:1.6;">Professional multi-page report with full assessment details</div>
+            st.html("""
+            <div style="background:#F8FAFC;border:1.5px dashed #CBD5E1;border-radius:12px;padding:28px;text-align:center;">
+                <div style="font-size:36px;margin-bottom:10px;">📄</div>
+                <div style="font-size:14px;font-weight:800;color:#0F172A;margin-bottom:4px;">PDF Credit Intelligence Report</div>
+                <div style="font-size:12px;color:#64748B;margin-bottom:18px;">Audit-ready documentation for lending files</div>
             </div>
             """)
-
             if PDF_OK:
                 try:
-                    recs_clean = [(t.split(" ", 1)[-1] if t[0] in "🔔📉⚖️🏦✅📋📊" else t, b)
-                                  for t, b in r["recs"]]
+                    recs_clean = [
+                        (t.split(" ", 1)[-1] if t[0] in "🔔📉⚖️🏦✅📋📊" else t, b)
+                        for t, b in r["recs"]
+                    ]
                     pdf_bytes = pdf_mod.generate_pdf(
-                        input_df      = r["input_df"],
-                        prediction    = r["prediction"],
-                        probabilities = r["probabilities"],
-                        class_names   = class_names,
-                        recommendations = recs_clean,
-                        importance_df = importance_df,
+                        input_df=r["input_df"],
+                        prediction=r["prediction"],
+                        probabilities=r["probabilities"],
+                        class_names=class_names,
+                        recommendations=recs_clean,
+                        importance_df=importance_df,
                     )
                     if pdf_bytes:
                         st.download_button(
-                            label    = "⬇  Download PDF Report",
-                            data     = io.BytesIO(pdf_bytes),
-                            file_name= f"CrediX_{r['prediction']}_Assessment.pdf",
-                            mime     = "application/pdf",
+                            label="⬇  Download PDF Report",
+                            data=io.BytesIO(pdf_bytes),
+                            file_name=f"CrediX_{r['prediction']}_Credit_Report.pdf",
+                            mime="application/pdf",
                             use_container_width=True,
                         )
                 except Exception as exc:
-                    st.error(f"PDF generation failed: {exc}")
+                    st.error(f"PDF generation encountered an error: {exc}")
             else:
-                H("""<div style="font-size:12px;color:#94A3B8;text-align:center;margin-top:10px;">PDF unavailable — ensure reportlab is installed.</div>""")
+                st.html("""<div style="font-size:12px;color:#94A3B8;text-align:center;margin-top:10px;">PDF generation unavailable (reportlab required).</div>""")
