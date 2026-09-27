@@ -1,0 +1,26 @@
+name: CrediX 24/7 Keep-Alive & Health Ping
+
+on:
+  schedule:
+    # Run every 10 minutes to prevent sleep
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Live Application URL
+        env:
+          APP_URL: ${{ secrets.LIVE_APP_URL }}
+        run: |
+          # If repository secret LIVE_APP_URL is set, use it. Otherwise use the default Streamlit URL pattern.
+          TARGET_URL="${APP_URL:-https://credix-explainable-credit-intelligence.streamlit.app}"
+          echo "Pinging target URL: $TARGET_URL"
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -L "$TARGET_URL" || echo "failed")
+          echo "Response HTTP Status: $STATUS_CODE"
+          if [ "$STATUS_CODE" = "200" ] || [ "$STATUS_CODE" = "302" ] || [ "$STATUS_CODE" = "301" ]; then
+            echo "✅ Target is responsive and alive."
+          else
+            echo "⚠️ Non-200 status code received ($STATUS_CODE), but heartbeat ping was registered."
+          fi
