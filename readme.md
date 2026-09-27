@@ -14,7 +14,9 @@ Trained and evaluated on **31,711 verified credit records**, CrediX transforms r
 
 ## 🖥️ Platform Preview
 
-![CrediX Dashboard](photos/homepage.png)
+| Landing & Input Dashboard | Full Underwriting & Risk Analysis |
+| :---: | :---: |
+| ![Landing Page](photos/landingpage.png) | ![Analysis Dashboard](photos/analysis.png) |
 
 ---
 
