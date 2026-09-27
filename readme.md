@@ -12,15 +12,45 @@ Trained and evaluated on **31,711 verified credit records**, CrediX transforms r
 
 ---
 
-## 🖥️ Platform Preview
+## 🖥️ Platform Showcase & Visual Walkthrough
 
-| Landing & Input Dashboard | Full Underwriting & Risk Analysis |
+### 1. Primary Workspaces
+
+| Landing & Applicant Financial Profile Input | Live Underwriting Decision & Credit Score |
 | :---: | :---: |
 | ![Landing Page](photos/landingpage.png) | ![Analysis Dashboard](photos/analysis.png) |
+| *Applicant profile configuration with 1-click test personas and real-time solvency ratios.* | *Comprehensive underwriting output with FICO score (300–850), risk gauge, and probability distribution.* |
 
 ---
 
-## 🌟 Key Features
+### 2. Multi-Tab Credit Intelligence & Analytics Suite
+
+#### Tab 1: Feature Impact & Explainability (Gini-MDI)
+Visualizes the relative mathematical weight and contribution of each customer variable across the calibrated ensemble estimators.
+![Feature Impact](photos/one.png)
+
+#### Tab 2: Actionable Credit Remediation Directives
+Algorithmically generates specific financial restructuring steps tailored to the applicant's debt-to-income and EMI commitments.
+![Actionable Guidance](photos/two.png)
+
+#### Tab 3: Model Performance & Strict Audit Report
+Displays held-out test evaluation metrics (Accuracy, Macro F1, Balanced Accuracy) and per-class precision/recall/F1 breakdown.
+![Model Performance](photos/three.png)
+
+#### Tab 4: Audit Trail & Parameter Summary
+Maintains an immutable session record of exact customer parameters, currency scale normalization, and underwriting policy metadata.
+![Input Summary](photos/four.png)
+
+#### Tab 5: Export Audit-Ready PDF Report
+Generates and downloads a multi-page, publication-quality PDF assessment file for institutional lending dossiers.
+![Export Report](photos/five.png)
+
+#### Additional Advisory View
+![Advisory](photos/six.png)
+
+---
+
+## 🌟 Core Platform Innovations
 
 ### 1. Dual Underwriting Decision Policies
 * **🛡️ Prudential Risk-Aware Mode (Default):** Specifically tuned for institutional lending. Flags high-risk default potential when $P(\text{Poor}) \ge 30\%$, **increasing default detection recall from 63.9% to 77.3%** and reducing catastrophic default false negatives by 39%.
@@ -54,9 +84,6 @@ Instant single-click loading of representative industry credit personas:
 * **⚖️ Balanced (Tier 2):** Average debt, isolated historical delays ($\text{Score} \approx 650$).
 * **⚠️ High-Risk (Tier 3):** High debt-to-income, recurring delinquency, low reserves ($\text{Score} < 500$).
 
-### 7. Audit-Ready PDF Generation
-Exports comprehensive, multi-page customer credit reports containing applicant parameters, probability distributions, risk breakdowns, customized financial recommendations, and model audit disclaimers.
-
 ---
 
 ## 📊 Dataset & Features
@@ -69,7 +96,7 @@ The model was developed on a benchmark credit dataset comprising **31,711 record
 | **Good** | 7,551 | 23.8% |
 | **Poor** | 4,430 | 14.0% |
 
-### Model Features (7 Evaluated Inputs)
+### Evaluated Model Features
 1. **Age (`Age`)**: Applicant age in years.
 2. **Occupation (`Occupation`)**: One-hot encoded professional categories.
 3. **Annual Income (`Annual_Income`)**: Total annual earnings.
@@ -147,8 +174,16 @@ CrediX-Explainable-Credit-Intelligence/
 ├── feature_bounds.joblib       # Domain bounds & percentiles for OOD guard
 ├── model_metrics.joblib        # Logged evaluation metrics & confusion matrix
 │
-├── photos/                     # Dashboard previews & screenshots
-│   └── homepage.png
+├── photos/                     # Complete platform visual tour
+│   ├── landingpage.png         # Main landing & applicant input interface
+│   ├── analysis.png            # Underwriting decision & score overview
+│   ├── one.png                 # Tab 1: Feature Impact & drivers
+│   ├── two.png                 # Tab 2: Actionable financial guidance
+│   ├── three.png               # Tab 3: Model performance & audit report
+│   ├── four.png                # Tab 4: Audit trail & input summary
+│   ├── five.png                # Tab 5: PDF report export engine
+│   └── six.png                 # Financial guidance detail view
+│
 ├── requirements.txt            # Python dependencies
 └── README.md                   # Project documentation
 ```
