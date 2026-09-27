@@ -171,6 +171,8 @@ def generate_pdf(
     prediction,
     probabilities,
     recommendations,
+    class_names=None,
+    importance_df=None,
 ):
     """
     Generate the CrediX customer credit assessment PDF.
@@ -418,7 +420,7 @@ def generate_pdf(
     story.append(
         Paragraph(
             "The prediction is generated using the trained CrediX "
-            "Random Forest classification pipeline.",
+            "Extra Trees classification pipeline with isotonic probability calibration.",
             normal_style,
         )
     )
@@ -590,18 +592,14 @@ def generate_pdf(
         ]
     ]
 
-    class_names = [
-        "Good",
-        "Poor",
-        "Standard",
-    ]
+    class_names_pdf = class_names if class_names else ["Good", "Poor", "Standard"]
 
     for i, probability in enumerate(
         probabilities_list
     ):
 
-        if i < len(class_names):
-            class_name = class_names[i]
+        if i < len(class_names_pdf):
+            class_name = class_names_pdf[i]
         else:
             class_name = f"Class {i + 1}"
 
@@ -700,7 +698,7 @@ def generate_pdf(
 
     story.append(
         Paragraph(
-            "Final model: Random Forest Classifier",
+            "Final model: Extra Trees Classifier with isotonic calibration",
             normal_style,
         )
     )
@@ -748,44 +746,28 @@ def generate_pdf(
         metric_rows.extend(
             [
                 [
-                    Paragraph(
-                        "Accuracy",
-                        normal_style,
-                    ),
-                    Paragraph(
-                        "80.20%",
-                        normal_style,
-                    ),
+                    Paragraph("Accuracy",          normal_style),
+                    Paragraph("78.62%",            normal_style),
                 ],
                 [
-                    Paragraph(
-                        "Precision",
-                        normal_style,
-                    ),
-                    Paragraph(
-                        "79.86%",
-                        normal_style,
-                    ),
+                    Paragraph("Balanced Accuracy", normal_style),
+                    Paragraph("73.62%",            normal_style),
                 ],
                 [
-                    Paragraph(
-                        "Recall",
-                        normal_style,
-                    ),
-                    Paragraph(
-                        "80.20%",
-                        normal_style,
-                    ),
+                    Paragraph("Macro Precision",   normal_style),
+                    Paragraph("74.94%",            normal_style),
                 ],
                 [
-                    Paragraph(
-                        "F1-Score",
-                        normal_style,
-                    ),
-                    Paragraph(
-                        "79.65%",
-                        normal_style,
-                    ),
+                    Paragraph("Macro Recall",      normal_style),
+                    Paragraph("73.62%",            normal_style),
+                ],
+                [
+                    Paragraph("Macro F1",          normal_style),
+                    Paragraph("74.26%",            normal_style),
+                ],
+                [
+                    Paragraph("Weighted F1",       normal_style),
+                    Paragraph("78.52%",            normal_style),
                 ],
             ]
         )
@@ -916,32 +898,81 @@ def generate_pdf(
         )
 
     # ========================================================
+    # FEATURE IMPORTANCE
+    # ========================================================
+
+    if importance_df is not None and len(importance_df) > 0:
+
+        story.append(
+            Paragraph("Key Model Drivers — Feature Importance", section_style)
+        )
+
+        imp_header = [
+            Paragraph("<b>Feature</b>", normal_style),
+            Paragraph("<b>Importance</b>", normal_style),
+        ]
+        imp_rows = [imp_header]
+
+        feature_display = {
+            "Outstanding_Debt":       "Outstanding Debt",
+            "Age":                    "Age",
+            "Total_EMI_per_month":    "Total Monthly EMI",
+            "Num_of_Delayed_Payment": "Delayed Payments",
+            "Annual_Income":          "Annual Income",
+            "Monthly_Balance":        "Monthly Balance",
+            "Occupation":             "Occupation",
+        }
+
+        for _, row in importance_df.iterrows():
+            disp_name = feature_display.get(str(row["Feature"]), str(row["Feature"]))
+            pct = float(row["Importance"]) * 100
+            imp_rows.append([
+                Paragraph(escape_text(disp_name), normal_style),
+                Paragraph(f"{pct:.2f}%", normal_style),
+            ])
+
+        imp_table = Table(imp_rows, colWidths=[110 * mm, 54 * mm])
+        imp_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+            ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+            ("BOX",        (0, 0), (-1, -1), 0.7, colors.HexColor("#D1D5DB")),
+            ("INNERGRID",  (0, 0), (-1, -1), 0.4, colors.HexColor("#E5E7EB")),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F9FAFB")),
+            ("ALIGN",      (1, 1), (1, -1), "RIGHT"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(imp_table)
+        story.append(Spacer(1, 6))
+        story.append(
+            Paragraph(
+                "Feature importance reflects the relative Gini-MDI contribution of each variable "
+                "as learned by the Extra Trees ensemble. It does not imply causation.",
+                small_style,
+            )
+        )
+
+    # ========================================================
     # METHODOLOGY
     # ========================================================
 
     story.append(
-        Paragraph(
-            "Machine Learning Methodology",
-            section_style,
-        )
+        Paragraph("Machine Learning Methodology", section_style)
     )
 
     methodology_text = (
         "CrediX uses a supervised machine learning pipeline for "
         "multi-class credit classification. The system processes "
         "numerical and categorical financial attributes before "
-        "passing the transformed data to a Random Forest classifier. "
-        "The model was evaluated using held-out test data and "
-        "cross-validation. Explainable AI functionality is provided "
-        "through SHAP-based feature analysis."
+        "passing the transformed data to an Extra Trees Classifier "
+        "with isotonic probability calibration. "
+        "The model was evaluated on held-out test data and selected "
+        "using cross-validated macro F1. Feature importance is derived "
+        "from tree-based Gini-MDI feature importance (not SHAP)."
     )
 
-    story.append(
-        Paragraph(
-            methodology_text,
-            normal_style,
-        )
-    )
+    story.append(Paragraph(methodology_text, normal_style))
+
 
     # ========================================================
     # DISCLAIMER

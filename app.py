@@ -1,2392 +1,1017 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import joblib
+"""
+CrediX — Explainable Credit Intelligence  v2.0
+Enterprise Credit Risk Assessment Platform
+Complete redesign: Plotly gauges · risk score · tabbed analytics · live ratios
+"""
+
+import io
 from pathlib import Path
 
-
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-
-st.set_page_config(
-    page_title="CrediX | Credit Intelligence",
-    page_icon="💳",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-
-# ============================================================
-# PATHS
-# ============================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-MODEL_PATH = BASE_DIR / "trained_credit_model.joblib"
-ENCODER_PATH = BASE_DIR / "label_encoder.joblib"
-FEATURES_PATH = BASE_DIR / "feature_names.joblib"
-METRICS_PATH = BASE_DIR / "model_metrics.joblib"
-BOUNDS_PATH = BASE_DIR / "feature_bounds.joblib"
-
-DATA_PATH = BASE_DIR / "data" / "credit_data.csv"
-
-
-# ============================================================
-# EXPECTED CUSTOMER FEATURES
-# ============================================================
-
-EXPECTED_FEATURES = [
-    "Age",
-    "Occupation",
-    "Annual_Income",
-    "Num_of_Delayed_Payment",
-    "Total_EMI_per_month",
-    "Outstanding_Debt",
-    "Monthly_Balance"
-]
-
-
-# ============================================================
-# MODEL LOADING
-# ============================================================
-
-@st.cache_resource
-def load_assets():
-
-    model = joblib.load(MODEL_PATH)
-    encoder = joblib.load(ENCODER_PATH)
-    saved_features = list(joblib.load(FEATURES_PATH))
-
-    if METRICS_PATH.exists():
-        metrics = joblib.load(METRICS_PATH)
-    else:
-        metrics = {}
-
-    if BOUNDS_PATH.exists():
-        bounds = joblib.load(BOUNDS_PATH)
-    else:
-        bounds = {}
-
-    return model, encoder, saved_features, metrics, bounds
-
+import joblib
+import numpy as np
+import pandas as pd
+import streamlit as st
 
 try:
+    import plotly.graph_objects as go
+    PLOTLY_OK = True
+except ImportError:
+    PLOTLY_OK = False
 
-    (
-        model,
-        label_encoder,
-        saved_features,
-        metrics,
-        feature_bounds
-    ) = load_assets()
+try:
+    import pdf_report as pdf_mod
+    PDF_OK = True
+except Exception:
+    PDF_OK = False
 
-except Exception as e:
+# ─────────────────────────────────────────────────────────────────
+# PAGE CONFIG  (must be the very first Streamlit call)
+# ─────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="CrediX | Credit Intelligence Platform",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-    st.error("CrediX model could not be loaded.")
+# ─────────────────────────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent
+DATA_PATH = BASE_DIR / "credit_data.csv"
 
-    st.code(str(e))
+EXPECTED_FEATURES = [
+    "Age", "Occupation", "Annual_Income",
+    "Num_of_Delayed_Payment", "Total_EMI_per_month",
+    "Outstanding_Debt", "Monthly_Balance",
+]
 
-    st.stop()
+OCCUPATIONS = [
+    "Accountant", "Architect", "Developer", "Doctor", "Engineer",
+    "Entrepreneur", "Journalist", "Lawyer", "Manager", "Mechanic",
+    "Media_Manager", "Musician", "Scientist", "Teacher", "Writer",
+]
 
+RATING = {
+    "Good":     {"hex": "#10B981", "bg": "#ECFDF5", "border": "#A7F3D0", "dark": "#065F46", "muted": "#D1FAE5"},
+    "Standard": {"hex": "#F59E0B", "bg": "#FFFBEB", "border": "#FDE68A", "dark": "#78350F", "muted": "#FEF3C7"},
+    "Poor":     {"hex": "#EF4444", "bg": "#FEF2F2", "border": "#FECACA", "dark": "#991B1B", "muted": "#FEE2E2"},
+}
 
-# ============================================================
-# MODEL FEATURE VALIDATION
-# ============================================================
+FEAT_DISPLAY = {
+    "Outstanding_Debt": "Outstanding Debt", "Age": "Age",
+    "Total_EMI_per_month": "Total Monthly EMI",
+    "Num_of_Delayed_Payment": "Delayed Payments",
+    "Annual_Income": "Annual Income", "Occupation": "Occupation",
+    "Monthly_Balance": "Monthly Balance",
+}
 
-# IMPORTANT:
-# Do NOT compare the order of the features.
-# The saved model previously had a different order:
-#
-# ['Age',
-#  'Annual_Income',
-#  'Num_of_Delayed_Payment',
-#  'Total_EMI_per_month',
-#  'Outstanding_Debt',
-#  'Monthly_Balance',
-#  'Occupation']
-#
-# while the dashboard uses:
-#
-# ['Age',
-#  'Occupation',
-#  'Annual_Income',
-#  ...]
-#
-# Both contain the same seven features.
+FALLBACK_IMP = {
+    "Outstanding_Debt": 0.199782, "Age": 0.147663,
+    "Total_EMI_per_month": 0.144677, "Num_of_Delayed_Payment": 0.122440,
+    "Annual_Income": 0.112197, "Occupation": 0.089825, "Monthly_Balance": 0.083416,
+}
 
-if set(saved_features) != set(EXPECTED_FEATURES):
+MODEL_METRICS = {
+    "Accuracy": 78.62, "Balanced Accuracy": 73.62, "Macro Precision": 74.94,
+    "Macro Recall": 73.62, "Macro F1": 74.26, "Weighted F1": 78.52,
+}
 
-    st.error("Model feature mismatch.")
+CLASS_METRICS = {
+    "Good":     {"Precision": 74.98, "Recall": 72.85, "F1": 73.90},
+    "Standard": {"Precision": 82.22, "Recall": 84.14, "F1": 83.17},
+    "Poor":     {"Precision": 67.62, "Recall": 63.88, "F1": 65.70},
+}
 
-    st.write("Dashboard features:")
-
-    st.code(str(EXPECTED_FEATURES))
-
-    st.write("Features saved with model:")
-
-    st.code(str(saved_features))
-
-    st.stop()
-
-
-# ============================================================
-# DATASET
-# ============================================================
-
-@st.cache_data
-def load_dataset():
-
-    if not DATA_PATH.exists():
-        return None
-
+# ─────────────────────────────────────────────────────────────────
+# LOAD ARTIFACTS
+# ─────────────────────────────────────────────────────────────────
+@st.cache_resource
+def load_model():
     try:
-        df = pd.read_csv(DATA_PATH)
-        return df
+        return joblib.load(BASE_DIR / "trained_credit_model.joblib")
+    except Exception as e:
+        st.error(f"CrediX model could not be loaded.\n\n{e}")
+        st.stop()
+
+@st.cache_resource
+def load_encoder():
+    try:
+        return joblib.load(BASE_DIR / "label_encoder.joblib")
     except Exception:
         return None
 
-
-dataset = load_dataset()
-
-
-# ============================================================
-# OCCUPATION OPTIONS
-# ============================================================
-
-DEFAULT_OCCUPATIONS = [
-    "Accountant",
-    "Architect",
-    "Developer",
-    "Doctor",
-    "Engineer",
-    "Entrepreneur",
-    "Journalist",
-    "Lawyer",
-    "Manager",
-    "Mechanic",
-    "Media_Manager",
-    "Musician",
-    "Scientist",
-    "Teacher",
-    "Writer"
-]
-
-
-if dataset is not None and "Occupation" in dataset.columns:
-
-    occupations_from_data = (
-        dataset["Occupation"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-    )
-
-    occupations_from_data = [
-        x for x in occupations_from_data.unique()
-        if x and x.lower() not in ["nan", "_______"]
-    ]
-
-    if occupations_from_data:
-
-        OCCUPATIONS = sorted(
-            set(occupations_from_data)
-            | set(DEFAULT_OCCUPATIONS)
-        )
-
-    else:
-
-        OCCUPATIONS = DEFAULT_OCCUPATIONS
-
-else:
-
-    OCCUPATIONS = DEFAULT_OCCUPATIONS
-
-
-# ============================================================
-# GLOBAL CSS
-# ============================================================
-
-st.markdown(
-    """
-<style>
-
-.stApp {
-
-    background:
-        radial-gradient(
-            circle at 10% 0%,
-            rgba(91,108,255,0.12),
-            transparent 30%
-        ),
-        radial-gradient(
-            circle at 90% 5%,
-            rgba(125,78,255,0.10),
-            transparent 30%
-        ),
-        #070A11;
-}
-
-
-/* MAIN CONTAINER */
-
-.block-container {
-
-    max-width: 1250px;
-
-    padding-top: 35px;
-
-    padding-bottom: 80px;
-}
-
-
-/* HIDE STREAMLIT UI */
-
-#MainMenu {
-    visibility: hidden;
-}
-
-footer {
-    visibility: hidden;
-}
-
-header {
-    visibility: hidden;
-}
-
-
-/* NORMAL TEXT */
-
-p,
-label,
-.stMarkdown {
-
-    color: #9AA5BA;
-}
-
-
-/* INPUTS */
-
-div[data-baseweb="input"],
-div[data-baseweb="select"] {
-
-    background: #101521 !important;
-
-    border-radius: 12px !important;
-}
-
-
-/* BUTTON */
-
-.stButton > button {
-
-    width: 100% !important;
-
-    min-height: 60px !important;
-
-    border-radius: 14px !important;
-
-    border: none !important;
-
-    background: linear-gradient(
-        90deg,
-        #6D82FF,
-        #7B4DFF
-    ) !important;
-
-    color: #FFFFFF !important;
-
-    -webkit-text-fill-color: #FFFFFF !important;
-
-    font-size: 18px !important;
-
-    font-weight: 700 !important;
-
-    opacity: 1 !important;
-
-    cursor: pointer !important;
-
-    box-shadow:
-        0 10px 35px
-        rgba(103,88,255,0.25);
-
-    transition:
-        transform 0.2s ease,
-        box-shadow 0.2s ease;
-}
-
-.stButton > button p {
-
-    color: #FFFFFF !important;
-
-    -webkit-text-fill-color: #FFFFFF !important;
-
-    font-weight: 700 !important;
-}
-
-.stButton > button:hover {
-
-    color: #FFFFFF !important;
-
-    -webkit-text-fill-color: #FFFFFF !important;
-
-    transform: translateY(-1px);
-
-    box-shadow:
-        0 14px 40px
-        rgba(103,88,255,0.38);
-}
-
-.stButton > button:active {
-
-    color: #FFFFFF !important;
-
-    -webkit-text-fill-color: #FFFFFF !important;
-
-    transform: translateY(0);
-}
-
-.stButton > button:disabled {
-
-    opacity: 1 !important;
-
-    color: #FFFFFF !important;
-
-    -webkit-text-fill-color: #FFFFFF !important;
-
-    cursor: pointer !important;
-}
-
-
-/* EXPANDERS */
-
-.streamlit-expanderHeader {
-
-    background: #101521 !important;
-
-    border: 1px solid
-        rgba(112,134,255,0.18) !important;
-
-    border-radius: 12px !important;
-
-    color: #F4F6FA !important;
-}
-
-
-/* DATAFRAME */
-
-div[data-testid="stDataFrame"] {
-
-    border-radius: 12px;
-}
-
-
-/* NUMBER INPUT LABEL */
-
-.stNumberInput label,
-.stSelectbox label {
-
-    color: #AAB4C7 !important;
-
-    font-weight: 600;
-}
-
-
-/* DIVIDER */
-
-hr {
-
-    border-color:
-        rgba(255,255,255,0.08) !important;
-}
-
-
-/* =========================================================
-   PREMIUM INPUT CARD DESIGN
-   ========================================================= */
-
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    border: 1px solid rgba(112, 133, 190, 0.20) !important;
-    border-radius: 18px !important;
-    background:
-        linear-gradient(
-            145deg,
-            rgba(20, 29, 48, 0.96),
-            rgba(12, 18, 31, 0.98)
-        ) !important;
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
-    padding: 5px !important;
-}
-
-div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    border-color: rgba(113, 134, 255, 0.36) !important;
-}
-
-.input-card-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background:
-        linear-gradient(
-            135deg,
-            rgba(105, 124, 255, 0.20),
-            rgba(119, 82, 255, 0.12)
-        );
-    border: 1px solid rgba(112, 134, 255, 0.22);
-    color: #9AA8FF;
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 12px;
-}
-
-.input-card-title {
-    color: #F1F4FA;
-    font-size: 17px;
-    font-weight: 750;
-    letter-spacing: -0.2px;
-    margin-bottom: 4px;
-}
-
-.input-card-subtitle {
-    color: #7D8AA2;
-    font-size: 12px;
-    line-height: 1.5;
-    margin-bottom: 14px;
-}
-
-.model-input-card {
-    min-height: 195px;
-    padding: 7px 4px;
-}
-
-.model-input-card .input-card-icon {
-    background:
-        linear-gradient(
-            135deg,
-            rgba(124, 86, 255, 0.24),
-            rgba(93, 119, 255, 0.14)
-        );
-    color: #AF9CFF;
-}
-
-.model-input-list {
-    color: #71809A;
-    font-size: 11px;
-    line-height: 1.65;
-    margin-top: 10px;
-}
-
-div[data-testid="stNumberInput"] {
-    margin-top: 0 !important;
-}
-
-div[data-testid="stNumberInput"] input {
-    background: #111827 !important;
-    color: #F4F6FA !important;
-    border: 1px solid #2A3852 !important;
-    border-radius: 11px !important;
-    min-height: 44px !important;
-    font-size: 15px !important;
-    font-weight: 550 !important;
-}
-
-div[data-testid="stNumberInput"] input:focus {
-    border-color: #7186FF !important;
-    box-shadow: 0 0 0 1px rgba(113, 134, 255, 0.28) !important;
-}
-
-div[data-testid="stNumberInput"] button {
-    background: #1A2438 !important;
-    color: #DDE4F3 !important;
-    border: none !important;
-}
-
-div[data-testid="stNumberInput"] button:hover {
-    background: #25314A !important;
-}
-
-div[data-testid="stSelectbox"] {
-    margin-top: 0 !important;
-}
-
-div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
-    background: #111827 !important;
-    border: 1px solid #2A3852 !important;
-    border-radius: 11px !important;
-    min-height: 44px !important;
-}
-
-div[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
-    border-color: #7186FF !important;
-    box-shadow: 0 0 0 1px rgba(113, 134, 255, 0.28) !important;
-}
-
-div[data-testid="stSelectbox"] [data-baseweb="select"] span {
-    color: #F4F6FA !important;
-    font-size: 15px !important;
-}
-
-div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stWidgetLabel"] {
-    margin-bottom: 0 !important;
-}
-
-.section-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background:
-        linear-gradient(
-            135deg,
-            rgba(101, 121, 255, 0.24),
-            rgba(119, 79, 255, 0.14)
-        );
-    border: 1px solid rgba(110, 130, 255, 0.23);
-    color: #A9B5FF;
-    font-size: 22px;
-    font-weight: 700;
-}
-
-.section-icon-finance {
-    background:
-        linear-gradient(
-            135deg,
-            rgba(128, 96, 255, 0.25),
-            rgba(96, 121, 255, 0.14)
-        );
-    color: #B6A3FF;
-}
-
-.section-heading {
-    color: #F3F5FA;
-    font-size: 29px;
-    font-weight: 800;
-    letter-spacing: -0.8px;
-}
-
-.section-helper {
-    color: #747F95;
-    font-size: 13px;
-    margin-top: 3px;
-}
-</style>
-""",
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
-# HTML HELPER
-# ============================================================
-
-def render_html(html):
-
-    """
-    Uses Streamlit's HTML renderer directly.
-
-    This is intentional.
-    st.markdown() was causing raw HTML to appear as
-    code blocks in the dashboard.
-    """
-
-    st.html(html)
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
-header_col1, header_col2 = st.columns([5, 1])
-
-with header_col1:
-
-    render_html(
-        """
-        <div style="
-            font-size:42px;
-            font-weight:850;
-            letter-spacing:-2px;
-            color:#F4F6FA;
-            margin-top:5px;
-        ">
-            Credi<span style="color:#7186FF;">X</span>
-        </div>
-
-        <div style="
-            font-size:14px;
-            color:#707B90;
-            margin-top:4px;
-        ">
-            Explainable Machine Learning Credit Intelligence
-        </div>
-        """
-    )
-
-
-with header_col2:
-
-    render_html(
-        """
-        <div style="
-            margin-top:12px;
-            text-align:center;
-            padding:10px 14px;
-            border-radius:30px;
-            border:1px solid rgba(110,130,255,0.30);
-            background:rgba(110,130,255,0.06);
-            color:#8A9AFF;
-            font-size:12px;
-            font-weight:700;
-            white-space:nowrap;
-        ">
-            ● AI SYSTEM ONLINE
-        </div>
-        """
-    )
-
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-
-# ============================================================
-# HERO
-# ============================================================
-
-render_html(
-    """
-    <div style="
-        padding:55px 65px;
-        border-radius:28px;
-        border:1px solid rgba(105,130,255,0.25);
-        background:
-            radial-gradient(
-                circle at 100% 0%,
-                rgba(93,109,255,0.14),
-                transparent 42%
-            ),
-            linear-gradient(
-                135deg,
-                #11182A,
-                #0D1220
-            );
-        margin-bottom:65px;
-    ">
-
-        <div style="
-            font-size:12px;
-            font-weight:800;
-            letter-spacing:3px;
-            color:#7D8BA8;
-            margin-bottom:22px;
-        ">
-            PERSONAL CREDIT INTELLIGENCE
-        </div>
-
-        <div style="
-            font-size:50px;
-            line-height:1.08;
-            font-weight:850;
-            letter-spacing:-2px;
-            color:#F5F7FB;
-        ">
-            Understand your
-            <span style="color:#7186FF;">
-                credit.
-            </span>
-            <br>
-            Make better financial decisions.
-        </div>
-
-        <div style="
-            max-width:900px;
-            margin-top:28px;
-            font-size:17px;
-            line-height:1.75;
-            color:#8995AA;
-        ">
-            CrediX analyses your financial profile using a
-            calibrated Extra Trees machine learning model
-            trained on 31,711 real credit records.
-            Get a predicted credit category, probability
-            analysis, explainable AI insights and
-            personalised financial recommendations.
-        </div>
-
-    </div>
-    """
-)
-
-
-# ============================================================
-# PERSONAL PROFILE
-# ============================================================
-
-render_html(
-    """
-    <div style="
-        display:flex;
-        align-items:center;
-        gap:15px;
-        margin-bottom:22px;
-    ">
-
-        <div class="section-icon">
-            ◉
-        </div>
-
-        <div>
-            <div class="section-heading">
-                Personal Profile
-            </div>
-
-            <div class="section-helper">
-                Tell us a little about yourself.
-            </div>
-        </div>
-
-    </div>
-    """
-)
-
-
-profile_col1, profile_col2 = st.columns(
-    2,
-    gap="large"
-)
-
-
-with profile_col1:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ◷
-            </div>
-
-            <div class="input-card-title">
-                Age
-            </div>
-
-            <div class="input-card-subtitle">
-                Enter your current age
-            </div>
-            """
-        )
-
-        age = st.number_input(
-            "Age",
-            min_value=18,
-            max_value=100,
-            value=30,
-            step=1,
-            label_visibility="collapsed"
-        )
-
-
-with profile_col2:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ◈
-            </div>
-
-            <div class="input-card-title">
-                Occupation
-            </div>
-
-            <div class="input-card-subtitle">
-                Select your profession
-            </div>
-            """
-        )
-
-        occupation = st.selectbox(
-            "Occupation",
-            OCCUPATIONS,
-            index=(
-                OCCUPATIONS.index("Accountant")
-                if "Accountant" in OCCUPATIONS
-                else 0
-            ),
-            label_visibility="collapsed"
-        )
-
-
-# ============================================================
-# FINANCIAL PROFILE
-# ============================================================
-
-st.markdown(
-    "<br><br>",
-    unsafe_allow_html=True
-)
-
-
-render_html(
-    """
-    <div style="
-        display:flex;
-        align-items:center;
-        gap:15px;
-        margin-bottom:22px;
-    ">
-
-        <div class="section-icon section-icon-finance">
-            ₹
-        </div>
-
-        <div>
-            <div class="section-heading">
-                Financial Profile
-            </div>
-
-            <div class="section-helper">
-                Enter the financial information used by the CrediX model.
-            </div>
-        </div>
-
-    </div>
-    """
-)
-
-
-financial_col1, financial_col2, financial_col3 = st.columns(
-    3,
-    gap="large"
-)
-
-
-with financial_col1:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ₹
-            </div>
-
-            <div class="input-card-title">
-                Annual Income
-            </div>
-
-            <div class="input-card-subtitle">
-                Your total yearly income
-            </div>
-            """
-        )
-
-        annual_income = st.number_input(
-            "Annual Income",
-            min_value=0.0,
-            max_value=1_000_000_000.0,
-            value=60000.0,
-            step=1000.0,
-            format="%.2f",
-            label_visibility="collapsed"
-        )
-
-
-with financial_col2:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ◷
-            </div>
-
-            <div class="input-card-title">
-                Delayed Payments
-            </div>
-
-            <div class="input-card-subtitle">
-                Number of past delayed payments
-            </div>
-            """
-        )
-
-        delayed_payments = st.number_input(
-            "Delayed Payments",
-            min_value=0,
-            max_value=100,
-            value=1,
-            step=1,
-            label_visibility="collapsed"
-        )
-
-
-with financial_col3:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ▣
-            </div>
-
-            <div class="input-card-title">
-                Total Monthly EMI
-            </div>
-
-            <div class="input-card-subtitle">
-                Total amount paid toward EMIs each month
-            </div>
-            """
-        )
-
-        monthly_emi = st.number_input(
-            "Total Monthly EMI",
-            min_value=0.0,
-            max_value=10_000_000.0,
-            value=5000.0,
-            step=100.0,
-            format="%.2f",
-            label_visibility="collapsed"
-        )
-
-
-financial_col4, financial_col5, financial_col6 = st.columns(
-    3,
-    gap="large"
-)
-
-
-with financial_col4:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ◉
-            </div>
-
-            <div class="input-card-title">
-                Outstanding Debt
-            </div>
-
-            <div class="input-card-subtitle">
-                Total remaining loan and credit debt
-            </div>
-            """
-        )
-
-        outstanding_debt = st.number_input(
-            "Outstanding Debt",
-            min_value=0.0,
-            max_value=1_000_000_000.0,
-            value=15000.0,
-            step=500.0,
-            format="%.2f",
-            label_visibility="collapsed"
-        )
-
-
-with financial_col5:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="input-card-icon">
-                ◐
-            </div>
-
-            <div class="input-card-title">
-                Monthly Balance
-            </div>
-
-            <div class="input-card-subtitle">
-                Your available monthly financial balance
-            </div>
-            """
-        )
-
-        monthly_balance = st.number_input(
-            "Monthly Balance",
-            min_value=0.0,
-            max_value=1_000_000_000.0,
-            value=40000.0,
-            step=500.0,
-            format="%.2f",
-            label_visibility="collapsed"
-        )
-
-
-with financial_col6:
-
-    with st.container(border=True):
-
-        render_html(
-            """
-            <div class="model-input-card">
-
-                <div class="input-card-icon">
-                    ✦
-                </div>
-
-                <div class="input-card-title">
-                    Model Input
-                </div>
-
-                <div class="input-card-subtitle">
-                    These seven customer-facing attributes
-                    are exactly the features used by the
-                    trained Extra Trees model.
-                </div>
-
-                <div class="model-input-list">
-                    Age · Occupation · Annual Income<br>
-                    Delayed Payments · Monthly EMI<br>
-                    Outstanding Debt · Monthly Balance
-                </div>
-
-            </div>
-            """
-        )
-
-
-# ============================================================
-# ANALYSE BUTTON
-# ============================================================
-
-st.markdown(
-    "<br><br>",
-    unsafe_allow_html=True
-)
-
-
-analyse = st.button(
-    "Analyse My Credit Profile",
-    type="primary",
-    use_container_width=True,
-    disabled=False
-)
-
-
-# ============================================================
-# PREDICTION
-# ============================================================
-
-if analyse:
-
-    # --------------------------------------------------------
-    # IMPORTANT:
-    # Construct using the exact saved model feature names.
-    # This prevents feature-order mismatch.
-    # --------------------------------------------------------
-
-    customer_values = {
-
-        "Age": age,
-
-        "Occupation": occupation,
-
-        "Annual_Income": annual_income,
-
-        "Num_of_Delayed_Payment": delayed_payments,
-
-        "Total_EMI_per_month": monthly_emi,
-
-        "Outstanding_Debt": outstanding_debt,
-
-        "Monthly_Balance": monthly_balance
-    }
-
-
-    input_df = pd.DataFrame(
-        [[customer_values[f] for f in saved_features]],
-        columns=saved_features
-    )
-
-
-    # --------------------------------------------------------
-    # PREDICTION
-    # --------------------------------------------------------
+@st.cache_resource
+def load_features():
+    try:
+        return list(joblib.load(BASE_DIR / "feature_names.joblib"))
+    except Exception:
+        return EXPECTED_FEATURES
+
+@st.cache_data
+def load_dataset():
+    try:
+        return pd.read_csv(DATA_PATH)
+    except Exception:
+        return None
+
+model       = load_model()
+encoder     = load_encoder()
+feat_order  = load_features()
+dataset     = load_dataset()
+class_names = list(encoder.classes_) if encoder else ["Good", "Poor", "Standard"]
+
+# ─────────────────────────────────────────────────────────────────
+# FEATURE IMPORTANCE
+# ─────────────────────────────────────────────────────────────────
+@st.cache_data
+def get_importance_df():
+    def _extract(est):
+        if hasattr(est, "named_steps"):
+            for k in ("classifier", "model", "estimator"):
+                if k in est.named_steps:
+                    r = _extract(est.named_steps[k])
+                    if r is not None:
+                        return r
+        if hasattr(est, "feature_importances_"):
+            return np.asarray(est.feature_importances_, dtype=float)
+        if hasattr(est, "calibrated_classifiers_"):
+            imps = []
+            for cal in est.calibrated_classifiers_:
+                base = getattr(cal, "estimator", None) or getattr(cal, "base_estimator", None)
+                if base:
+                    r = _extract(base)
+                    if r is not None:
+                        imps.append(r)
+            if imps:
+                return np.mean(np.vstack(imps), axis=0)
+        for attr in ("estimator", "base_estimator"):
+            inner = getattr(est, attr, None)
+            if inner:
+                r = _extract(inner)
+                if r is not None:
+                    return r
+        return None
 
     try:
+        raw  = _extract(model)
+        prep = None
+        if hasattr(model, "named_steps"):
+            for k in ("preprocessor", "transformer"):
+                if k in model.named_steps:
+                    prep = model.named_steps[k]; break
+        if raw is None or prep is None:
+            raise ValueError("extraction failed")
 
-        prediction = model.predict(input_df)
+        col_names = prep.get_feature_names_out()
+        agg: dict = {}
+        for feat, imp in zip(col_names, raw):
+            key  = feat.split("__")[-1] if "__" in feat else feat
+            base = "Occupation" if key.startswith("Occupation") else key
+            agg[base] = agg.get(base, 0.0) + float(imp)
 
-        probabilities = model.predict_proba(input_df)[0]
+        total = sum(agg.values()) or 1.0
+        return pd.DataFrame(
+            [{"Feature": k, "Importance": v / total} for k, v in agg.items()]
+        ).sort_values("Importance", ascending=False).reset_index(drop=True)
 
-        predicted_class = label_encoder.inverse_transform(
-            prediction
-        )[0]
+    except Exception:
+        return pd.DataFrame(
+            [{"Feature": k, "Importance": v} for k, v in FALLBACK_IMP.items()]
+        ).sort_values("Importance", ascending=False).reset_index(drop=True)
 
-        class_names = list(label_encoder.classes_)
+importance_df = get_importance_df()
 
-        probability_map = {
-            cls: float(probabilities[i])
-            for i, cls in enumerate(class_names)
-        }
+# ─────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────
+def H(s: str):
+    """Render raw HTML block."""
+    st.html(s)
 
-        confidence = max(probability_map.values()) * 100
+def compute_risk_score(probabilities, class_names):
+    weights = {"Good": 14.0, "Standard": 52.0, "Poor": 88.0}
+    return round(float(sum(probabilities[i] * weights.get(c, 50.0)
+                           for i, c in enumerate(class_names))), 1)
 
+def build_input_df(age, occupation, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance):
+    raw = {
+        "Age": age, "Occupation": occupation,
+        "Annual_Income": float(annual_income),
+        "Num_of_Delayed_Payment": int(delayed_payments),
+        "Total_EMI_per_month": float(emi),
+        "Outstanding_Debt": float(outstanding_debt),
+        "Monthly_Balance": float(monthly_balance),
+    }
+    return pd.DataFrame([{f: raw[f] for f in feat_order}])
 
-    except Exception as e:
+def run_prediction(input_df):
+    pred_enc      = model.predict(input_df)
+    probabilities = model.predict_proba(input_df)[0]
+    label         = encoder.inverse_transform(pred_enc)[0] if encoder else str(pred_enc[0])
+    return label, probabilities
 
-        st.error("Prediction failed.")
+def get_recommendations(pred, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance):
+    recs = []
+    mi        = annual_income / 12 if annual_income > 0 else 1
+    emi_ratio = emi / mi         if mi > 0           else 0
+    dti       = outstanding_debt / annual_income if annual_income > 0 else 0
 
-        st.code(str(e))
+    if delayed_payments > 3:
+        recs.append(("🔔 Payment History",
+            f"You have {int(delayed_payments)} recorded late payments. Set up autopay or calendar reminders — consistent on-time payments are the single biggest driver of credit improvement."))
+    if emi_ratio > 0.40:
+        recs.append(("📉 EMI Burden",
+            f"Annual EMI commitment is {emi_ratio:.0%} of monthly income — above the recommended 40% ceiling. Consider consolidating loans or prepaying high-interest obligations."))
+    if dti > 1.5:
+        recs.append(("⚖️ Debt Load",
+            f"Outstanding debt stands at {dti:.1f}× annual income. A structured debt-reduction plan focused on high-APR accounts can meaningfully lower your risk score within 12 months."))
+    if monthly_balance < mi * 0.10:
+        recs.append(("🏦 Liquidity Reserve",
+            f"Monthly balance is low relative to income. Building a 3-month emergency fund (~₹{annual_income/4:,.0f}) improves both financial resilience and perceived creditworthiness."))
+    if pred == "Good" and delayed_payments == 0:
+        recs.append(("✅ Sustain Excellence",
+            "Your profile scores well across all dimensions. Continue disciplined on-time payments and avoid taking on debt disproportionate to income to maintain your Good rating."))
+    if pred == "Standard" and not recs:
+        recs.append(("📋 Incremental Improvement",
+            "Your profile sits at Standard. Reducing outstanding debt by 20% and eliminating any new delayed payments over the next 6 months could shift you to Good."))
+    if not recs:
+        recs.append(("📊 Ongoing Monitoring",
+            "No specific risk flags detected. Review your financial ratios quarterly and maintain current payment discipline."))
+    return recs[:4]
 
-        st.stop()
-
-
-    # ========================================================
-    # CREDIT ASSESSMENT
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    st.header("Credit Assessment")
-
-    st.caption(
-        "Your machine learning assessment."
+# ─────────────────────────────────────────────────────────────────
+# PLOTLY CHARTS
+# ─────────────────────────────────────────────────────────────────
+def make_gauge(risk_score: float, prediction: str):
+    cfg = RATING.get(prediction, RATING["Standard"])
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=risk_score,
+        number={"font": {"size": 42, "color": "#0F172A", "family": "Inter, system-ui"}, "suffix": ""},
+        gauge={
+            "axis": {
+                "range": [0, 100], "tickwidth": 1, "tickcolor": "#CBD5E1",
+                "tickvals": [0, 35, 65, 100],
+                "ticktext": ["Low", "Medium", "High", "Critical"],
+                "tickfont": {"size": 9, "color": "#94A3B8"},
+            },
+            "bar":  {"color": cfg["hex"], "thickness": 0.22},
+            "bgcolor": "white", "borderwidth": 0,
+            "steps": [
+                {"range": [0,  35], "color": "#ECFDF5"},
+                {"range": [35, 65], "color": "#FFFBEB"},
+                {"range": [65, 100], "color": "#FEF2F2"},
+            ],
+            "threshold": {
+                "line": {"color": cfg["hex"], "width": 4},
+                "thickness": 0.8, "value": risk_score,
+            },
+        },
+    ))
+    fig.update_layout(
+        height=240, margin={"l": 20, "r": 20, "t": 15, "b": 0},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font={"family": "Inter, system-ui"},
     )
+    return fig
 
+def make_prob_chart(probabilities, class_names, prediction):
+    COLOR = {"Good": "#10B981", "Standard": "#F59E0B", "Poor": "#EF4444"}
+    pairs  = sorted(zip(class_names, probabilities), key=lambda x: x[1], reverse=True)
+    labels = [p[0] for p in pairs]
+    vals   = [p[1] * 100  for p in pairs]
+    colors = [COLOR.get(l, "#6B7280") for l in labels]
+    ylabels = [f"<b>{l}</b>" if l == prediction else l for l in labels]
 
-    assessment_col1, assessment_col2 = st.columns(2)
-
-
-    # --------------------------------------------------------
-    # DESCRIPTION
-    # --------------------------------------------------------
-
-    if predicted_class == "Good":
-
-        result_description = (
-            "Your profile is classified as Good by the "
-            "CrediX model. The model identifies relatively "
-            "strong financial characteristics in the provided profile."
-        )
-
-        result_accent = "#61D095"
-
-
-    elif predicted_class == "Poor":
-
-        result_description = (
-            "Your profile is classified as Poor by the "
-            "CrediX model. The assessment indicates areas "
-            "where reducing financial pressure may be beneficial."
-        )
-
-        result_accent = "#FF7777"
-
-
-    else:
-
-        result_description = (
-            "Your profile is classified as Standard by the "
-            "CrediX model. There are opportunities to strengthen "
-            "the overall financial profile."
-        )
-
-        result_accent = "#A9B5FF"
-
-
-    with assessment_col1:
-
-        render_html(
-            f"""
-            <div style="
-                min-height:300px;
-                padding:40px;
-                border-radius:25px;
-                border:1px solid rgba(105,130,255,0.25);
-                background:
-                    radial-gradient(
-                        circle at 100% 0%,
-                        rgba(93,109,255,0.12),
-                        transparent 45%
-                    ),
-                    #0D1220;
-            ">
-
-                <div style="
-                    font-size:13px;
-                    font-weight:800;
-                    letter-spacing:2px;
-                    color:#77849C;
-                ">
-                    PREDICTED CREDIT CATEGORY
-                </div>
-
-                <div style="
-                    margin-top:42px;
-                    font-size:52px;
-                    font-weight:850;
-                    letter-spacing:-2px;
-                    color:{result_accent};
-                ">
-                    {predicted_class}
-                </div>
-
-                <div style="
-                    margin-top:35px;
-                    font-size:15px;
-                    line-height:1.7;
-                    color:#8995AA;
-                ">
-                    {result_description}
-                </div>
-
-            </div>
-            """
-        )
-
-
-    with assessment_col2:
-
-        render_html(
-            f"""
-            <div style="
-                min-height:300px;
-                padding:40px;
-                border-radius:25px;
-                border:1px solid rgba(105,130,255,0.25);
-                background:
-                    radial-gradient(
-                        circle at 100% 0%,
-                        rgba(93,109,255,0.12),
-                        transparent 45%
-                    ),
-                    #0D1220;
-            ">
-
-                <div style="
-                    font-size:13px;
-                    font-weight:800;
-                    letter-spacing:2px;
-                    color:#77849C;
-                ">
-                    MODEL CONFIDENCE
-                </div>
-
-                <div style="
-                    margin-top:42px;
-                    font-size:52px;
-                    font-weight:850;
-                    letter-spacing:-2px;
-                    color:#F5F7FB;
-                ">
-                    {confidence:.1f}%
-                </div>
-
-                <div style="
-                    margin-top:35px;
-                    font-size:15px;
-                    line-height:1.7;
-                    color:#8995AA;
-                ">
-                    Confidence represents the probability
-                    assigned to the predicted category by
-                    the calibrated Extra Trees classifier.
-                </div>
-
-            </div>
-            """
-        )
-
-
-    # ========================================================
-    # PROBABILITY
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    st.header("Prediction Probability")
-
-    st.caption(
-        "How the model distributes probability across each category."
+    fig = go.Figure(go.Bar(
+        x=vals, y=ylabels, orientation="h",
+        marker={"color": colors, "line": {"width": 0}, "cornerradius": 5},
+        text=[f"<b>{v:.1f}%</b>" for v in vals],
+        textposition="outside",
+        textfont={"size": 13, "color": "#374151", "family": "Inter, system-ui"},
+        cliponaxis=False,
+    ))
+    fig.update_layout(
+        height=180, margin={"l": 0, "r": 70, "t": 10, "b": 10},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={"range": [0, 118], "showgrid": False, "showticklabels": False, "zeroline": False},
+        yaxis={"showgrid": False, "tickfont": {"size": 13, "color": "#374151", "family": "Inter"}},
+        showlegend=False, bargap=0.38,
     )
+    return fig
 
+def make_importance_chart(imp_df):
+    df  = imp_df.copy()
+    df["Label"] = df["Feature"].map(lambda f: FEAT_DISPLAY.get(f, f))
+    df  = df.sort_values("Importance", ascending=True)
+    mx  = df["Importance"].max()
+    colors = [f"rgba(37,99,235,{0.25 + 0.75*(v/mx):.2f})" for v in df["Importance"]]
 
-    prob_col1, prob_col2, prob_col3 = st.columns(3)
+    fig = go.Figure(go.Bar(
+        x=df["Importance"] * 100, y=df["Label"], orientation="h",
+        marker={"color": colors, "line": {"width": 0}, "cornerradius": 5},
+        text=[f"<b>{v*100:.1f}%</b>" for v in df["Importance"]],
+        textposition="outside",
+        textfont={"size": 12, "color": "#374151", "family": "Inter, system-ui"},
+        cliponaxis=False,
+    ))
+    fig.update_layout(
+        height=300, margin={"l": 0, "r": 70, "t": 10, "b": 10},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis={
+            "showgrid": True, "gridcolor": "#F1F5F9",
+            "showticklabels": False, "zeroline": False, "range": [0, mx * 132],
+        },
+        yaxis={"showgrid": False, "tickfont": {"size": 12, "color": "#374151", "family": "Inter"}},
+        showlegend=False, bargap=0.32,
+    )
+    return fig
 
+# ─────────────────────────────────────────────────────────────────
+# CSS
+# ─────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
+}
+.stApp { background: #F0F4F8 !important; }
+#MainMenu, footer, header { visibility: hidden; }
 
-    good_probability = probability_map.get(
-        "Good",
-        0.0
-    ) * 100
+.block-container {
+    max-width: 100% !important; padding-top: 0 !important;
+    padding-bottom: 60px !important; padding-left: 2rem !important; padding-right: 2rem !important;
+}
 
+/* ── SIDEBAR ── */
+[data-testid="stSidebar"] {
+    background: #0A0F1E !important; border-right: 1px solid #111827 !important;
+    min-width: 230px !important; max-width: 230px !important;
+}
+[data-testid="stSidebar"] * { color: #CBD5E1 !important; }
+[data-testid="stSidebarNav"] { display: none !important; }
 
-    poor_probability = probability_map.get(
-        "Poor",
-        0.0
-    ) * 100
+h1,h2,h3,h4 { color: #0F172A !important; letter-spacing: -0.3px; }
+p, label, .stMarkdown p { color: #475569 !important; }
 
+/* ── NUMBER INPUTS ── */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none !important; margin: 0 !important; }
+input[type="number"] { -moz-appearance: textfield !important; }
 
-    standard_probability = probability_map.get(
-        "Standard",
-        0.0
-    ) * 100
+div[data-testid="stNumberInput"] input {
+    background: #FFFFFF !important; color: #0F172A !important;
+    border: 1.5px solid #D1D5DB !important; border-radius: 8px !important;
+    min-height: 46px !important; font-size: 15px !important; font-weight: 600 !important;
+    padding: 10px 14px !important; box-shadow: inset 0 1px 2px rgba(0,0,0,0.03) !important;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+div[data-testid="stNumberInput"] input:focus {
+    border-color: #2563EB !important; outline: none !important;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.14) !important;
+}
+div[data-testid="stNumberInput"] button {
+    background: #F9FAFB !important; color: #6B7280 !important;
+    border: 1.5px solid #E5E7EB !important; border-radius: 6px !important;
+    width: 30px !important; min-height: 30px !important; max-height: 30px !important;
+    font-size: 14px !important; font-weight: 700 !important;
+    padding: 0 !important; margin: 2px !important; box-shadow: none !important; cursor: pointer !important;
+}
+div[data-testid="stNumberInput"] button:hover { background: #E5E7EB !important; color: #111827 !important; border-color: #D1D5DB !important; }
+div[data-testid="stNumberInput"] button p { color: #6B7280 !important; font-weight: 800 !important; }
+div[data-testid="stNumberInput"] button:hover p { color: #111827 !important; }
 
+/* ── SELECTBOX ── */
+div[data-testid="stSelectbox"] > div > div,
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background: #FFFFFF !important; border: 1.5px solid #D1D5DB !important;
+    border-radius: 8px !important; min-height: 46px !important;
+}
+div[data-testid="stSelectbox"] > div > div:focus-within,
+div[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+    border-color: #2563EB !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.14) !important;
+}
+div[data-testid="stSelectbox"] *,
+div[data-testid="stSelectbox"] span,
+div[data-testid="stSelectbox"] div[class*="singleValue"],
+div[data-testid="stSelectbox"] div[class*="placeholder"] {
+    color: #111827 !important; font-size: 15px !important; font-weight: 600 !important;
+}
+div[data-testid="stSelectbox"] svg { color: #6B7280 !important; fill: #6B7280 !important; }
+[data-baseweb="popover"] li, [data-baseweb="menu"] li { color: #111827 !important; background: #FFFFFF !important; font-size: 14px !important; }
+[data-baseweb="popover"] [aria-selected="true"], [data-baseweb="menu"] [aria-selected="true"],
+[data-baseweb="popover"] li:hover, [data-baseweb="menu"] li:hover { background: #EFF6FF !important; color: #1D4ED8 !important; }
 
-    with prob_col1:
+/* ── LABELS ── */
+div[data-testid="stWidgetLabel"] label {
+    color: #374151 !important; font-size: 11px !important; font-weight: 800 !important;
+    text-transform: uppercase !important; letter-spacing: 0.5px !important;
+}
 
-        render_html(
-            f"""
-            <div style="padding:20px 0;">
+/* ── PRIMARY FORM SUBMIT ── */
+[data-testid="stFormSubmitButton"] button,
+[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"] {
+    background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
+    border: none !important; border-radius: 8px !important; font-size: 14px !important;
+    font-weight: 700 !important; min-height: 48px !important; width: 100% !important;
+    cursor: pointer !important; opacity: 1 !important;
+    box-shadow: 0 1px 3px rgba(37,99,235,0.3), 0 1px 2px rgba(0,0,0,0.06);
+    transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+[data-testid="stFormSubmitButton"] button:hover,
+[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"]:hover {
+    background: #1D4ED8 !important; box-shadow: 0 6px 18px rgba(37,99,235,0.4) !important; transform: translateY(-1px);
+}
+[data-testid="stFormSubmitButton"] button p,
+[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"] p {
+    color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important;
+}
 
-                <div style="
-                    font-size:16px;
-                    color:#9BA7BB;
-                ">
-                    Good
-                </div>
+/* ── SECONDARY FORM SUBMIT ── */
+[data-testid="stFormSubmitButton"] button[kind="secondaryFormSubmit"] {
+    background: #FFFFFF !important; color: #374151 !important; -webkit-text-fill-color: #374151 !important;
+    border: 1.5px solid #D1D5DB !important; box-shadow: none !important;
+}
+[data-testid="stFormSubmitButton"] button[kind="secondaryFormSubmit"]:hover { background: #F9FAFB !important; transform: none; }
+[data-testid="stFormSubmitButton"] button[kind="secondaryFormSubmit"] p { color: #374151 !important; -webkit-text-fill-color: #374151 !important; }
 
-                <div style="
-                    margin-top:12px;
-                    font-size:40px;
-                    font-weight:750;
-                    color:#F5F7FB;
-                ">
-                    {good_probability:.1f}%
-                </div>
+/* ── st.button ── */
+.stButton > button {
+    background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
+    border: none !important; border-radius: 8px !important; font-size: 14px !important;
+    font-weight: 700 !important; min-height: 44px !important; cursor: pointer !important; opacity: 1 !important;
+    box-shadow: 0 1px 3px rgba(37,99,235,0.25);
+}
+.stButton > button p { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important; }
+.stButton > button:hover { background: #1D4ED8 !important; }
+.stButton > button:disabled { opacity: 1 !important; }
 
-            </div>
-            """
-        )
+/* ── DOWNLOAD ── */
+[data-testid="stDownloadButton"] button {
+    background: #2563EB !important; color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
+    border: none !important; border-radius: 8px !important; font-weight: 700 !important;
+    min-height: 48px !important; width: 100% !important; cursor: pointer !important;
+}
+[data-testid="stDownloadButton"] button p { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; font-weight: 700 !important; }
+[data-testid="stDownloadButton"] button:hover { background: #1D4ED8 !important; }
 
+/* ── TABS ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0; border-bottom: 2px solid #E2E8F0 !important; background: transparent;
+    margin-bottom: 0;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    color: #64748B !important; font-size: 13px; font-weight: 600;
+    padding: 12px 22px; margin-bottom: -2px; letter-spacing: 0.1px;
+    transition: color 0.15s;
+}
+.stTabs [aria-selected="true"] { color: #2563EB !important; border-bottom-color: #2563EB !important; background: transparent; }
+.stTabs [data-baseweb="tab-panel"] { padding: 28px 0 0 0; }
 
-    with prob_col2:
+/* ── EXPANDERS ── */
+.streamlit-expanderHeader { background: #FFFFFF !important; border: 1px solid #E2E8F0 !important; border-radius: 6px !important; color: #0F172A !important; font-weight: 600 !important; }
+.streamlit-expanderContent { border: 1px solid #E2E8F0 !important; border-top: none !important; border-radius: 0 0 6px 6px !important; }
 
-        render_html(
-            f"""
-            <div style="padding:20px 0;">
+/* ── METRICS ── */
+div[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 18px !important; }
+div[data-testid="stMetricLabel"] { color: #64748B !important; font-size: 11px !important; font-weight: 700 !important; text-transform: uppercase !important; letter-spacing: 0.4px !important; }
+div[data-testid="stMetricValue"] { color: #0F172A !important; font-size: 24px !important; font-weight: 800 !important; }
 
-                <div style="
-                    font-size:16px;
-                    color:#9BA7BB;
-                ">
-                    Poor
-                </div>
+/* ── FORM ── */
+[data-testid="stForm"] { background: #FFFFFF !important; border: 1.5px solid #E2E8F0 !important; border-radius: 14px !important; padding: 12px !important; }
 
-                <div style="
-                    margin-top:12px;
-                    font-size:40px;
-                    font-weight:750;
-                    color:#F5F7FB;
-                ">
-                    {poor_probability:.1f}%
-                </div>
+hr { border-color: #E2E8F0 !important; margin: 20px 0 !important; }
+.stCaption { color: #94A3B8 !important; font-size: 12px !important; }
+div[data-testid="stVerticalBlockBorderWrapper"] { border: 1.5px solid #E2E8F0 !important; border-radius: 10px !important; background: #FFFFFF !important; padding: 20px !important; }
 
-            </div>
-            """
-        )
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #F0F4F8; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+</style>
+""", unsafe_allow_html=True)
 
-
-    with prob_col3:
-
-        render_html(
-            f"""
-            <div style="padding:20px 0;">
-
-                <div style="
-                    font-size:16px;
-                    color:#9BA7BB;
-                ">
-                    Standard
-                </div>
-
-                <div style="
-                    margin-top:12px;
-                    font-size:40px;
-                    font-weight:750;
-                    color:#F5F7FB;
-                ">
-                    {standard_probability:.1f}%
-                </div>
-
-            </div>
-            """
-        )
-
-
-    # ========================================================
-    # PROBABILITY BAR
-    # ========================================================
-
-    st.markdown(
-        f"""
-        <div style="
-            width:100%;
-            height:10px;
-            border-radius:10px;
-            overflow:hidden;
-            background:#171D2A;
-            margin:10px 0 35px 0;
-        ">
-
-            <div style="
-                width:{good_probability:.2f}%;
-                height:100%;
-                background:#61D095;
-                float:left;
-            "></div>
-
-            <div style="
-                width:{poor_probability:.2f}%;
-                height:100%;
-                background:#FF7777;
-                float:left;
-            "></div>
-
-            <div style="
-                width:{standard_probability:.2f}%;
-                height:100%;
-                background:#7186FF;
-                float:left;
-            "></div>
-
+# ─────────────────────────────────────────────────────────────────
+# SIDEBAR
+# ─────────────────────────────────────────────────────────────────
+with st.sidebar:
+    H("""
+    <div style="padding:26px 20px 20px;border-bottom:1px solid #1E293B;margin-bottom:22px;">
+        <div style="font-size:24px;font-weight:900;color:#F1F5F9;letter-spacing:-0.5px;line-height:1.1;">
+            Credi<span style="color:#3B82F6;">X</span>
         </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-    # ========================================================
-    # FINANCIAL SNAPSHOT
-    # ========================================================
-
-    st.header("Financial Snapshot")
-
-    snap1, snap2, snap3, snap4 = st.columns(4)
-
-
-    def money(value):
-
-        return f"₹{value:,.2f}"
-
-
-    with snap1:
-
-        st.caption("Annual Income")
-
-        st.markdown(
-            f"### {money(annual_income)}"
-        )
-
-
-    with snap2:
-
-        st.caption("Outstanding Debt")
-
-        st.markdown(
-            f"### {money(outstanding_debt)}"
-        )
-
-
-    with snap3:
-
-        st.caption("Monthly EMI")
-
-        st.markdown(
-            f"### {money(monthly_emi)}"
-        )
-
-
-    with snap4:
-
-        st.caption("Delayed Payments")
-
-        st.markdown(
-            f"### {delayed_payments}"
-        )
-
-
-    # ========================================================
-    # FINANCIAL RATIOS
-    # ========================================================
-
-    monthly_income = annual_income / 12
-
-    if monthly_income > 0:
-
-        emi_ratio = (
-            monthly_emi / monthly_income
-        ) * 100
-
-    else:
-
-        emi_ratio = 0
-
-
-    if annual_income > 0:
-
-        debt_to_income = (
-            outstanding_debt / annual_income
-        ) * 100
-
-    else:
-
-        debt_to_income = 0
-
-
-    # ========================================================
-    # RECOMMENDATIONS
-    # ========================================================
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.header("Your Next Best Actions")
-
-    st.caption(
-        "Personalised suggestions based on your financial profile."
-    )
-
-
-    recommendations = []
-
-
-    if delayed_payments > 0:
-
-        recommendations.append(
-            (
-                "Prioritise payment consistency",
-                "You have recorded delayed payments. "
-                "Maintaining consistent payment behaviour "
-                "can strengthen your credit profile over time."
-            )
-        )
-
-
-    if outstanding_debt > annual_income * 0.5:
-
-        recommendations.append(
-            (
-                "Reduce outstanding debt",
-                "Your outstanding debt is relatively high "
-                "compared with annual income. Consider a "
-                "structured debt-reduction strategy."
-            )
-        )
-
-
-    if emi_ratio > 40:
-
-        recommendations.append(
-            (
-                "Control monthly EMI pressure",
-                f"Your EMI represents approximately "
-                f"{emi_ratio:.1f}% of estimated monthly income. "
-                "Reducing fixed debt obligations may improve "
-                "financial flexibility."
-            )
-        )
-
-
-    if monthly_balance < monthly_income * 0.2:
-
-        recommendations.append(
-            (
-                "Build a stronger financial buffer",
-                "Your monthly balance is relatively low "
-                "compared with estimated monthly income. "
-                "Consider building an emergency reserve."
-            )
-        )
-
-
-    if delayed_payments == 0 and emi_ratio <= 40:
-
-        recommendations.append(
-            (
-                "Maintain healthy payment behaviour",
-                "Your current payment pattern does not show "
-                "delayed payments and your EMI burden is "
-                "within a moderate range."
-            )
-        )
-
-
-    if predicted_class == "Good":
-
-        recommendations.append(
-            (
-                "Maintain your current financial discipline",
-                "The model currently classifies the profile "
-                "as Good. Continue monitoring debt, payment "
-                "consistency and available financial balance."
-            )
-        )
-
-
-    if predicted_class == "Standard":
-
-        recommendations.append(
-            (
-                "Strengthen your financial profile",
-                "Focus on consistent payments, controlled debt "
-                "and maintaining a stronger monthly financial buffer."
-            )
-        )
-
-
-    if predicted_class == "Poor":
-
-        recommendations.append(
-            (
-                "Focus on reducing financial pressure",
-                "Prioritise timely payments, debt reduction and "
-                "improving the available monthly financial buffer."
-            )
-        )
-
-
-    # Show maximum 4 recommendations
-
-    recommendations = recommendations[:4]
-
-
-    rec_col1, rec_col2 = st.columns(2)
-
-
-    for i, (title, description) in enumerate(recommendations):
-
-        target_col = (
-            rec_col1
-            if i % 2 == 0
-            else rec_col2
-        )
-
-        with target_col:
-
-            render_html(
-                f"""
-                <div style="
-                    margin-top:20px;
-                    min-height:145px;
-                    padding:28px;
-                    border-radius:20px;
-                    border:1px solid
-                        rgba(105,130,255,0.15);
-                    background:#0D1421;
-                ">
-
-                    <div style="
-                        font-size:16px;
-                        font-weight:750;
-                        color:#E9EDF5;
-                    ">
-                        {title}
-                    </div>
-
-                    <div style="
-                        margin-top:16px;
-                        font-size:14px;
-                        line-height:1.65;
-                        color:#7F8BA1;
-                    ">
-                        {description}
-                    </div>
-
-                </div>
-                """
-            )
-
-
-    # ========================================================
-    # EXPLAINABLE AI
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    st.header("Explainable AI")
-
-    st.caption(
-        "Understand which model features influence the assessment."
-    )
-
-
-    # --------------------------------------------------------
-    # FEATURE IMPORTANCE EXTRACTION
-    # --------------------------------------------------------
-
-    def find_feature_importances(estimator):
-
-        """
-        Robustly finds Extra Trees feature importance from:
-
-        Pipeline
-        CalibratedClassifierCV
-        ExtraTreesClassifier
-        Nested estimator structures
-        """
-
-        # Pipeline
-        if hasattr(estimator, "named_steps"):
-
-            steps = estimator.named_steps
-
-            # Try classifier first
-            if "classifier" in steps:
-
-                return find_feature_importances(
-                    steps["classifier"]
-                )
-
-            if "model" in steps:
-
-                return find_feature_importances(
-                    steps["model"]
-                )
-
-
-        # Direct feature_importances_
-        if hasattr(estimator, "feature_importances_"):
-
-            try:
-
-                return np.asarray(
-                    estimator.feature_importances_,
-                    dtype=float
-                )
-
-            except Exception:
-
-                pass
-
-
-        # CalibratedClassifierCV
-        if hasattr(
-            estimator,
-            "calibrated_classifiers_"
-        ):
-
-            all_importances = []
-
-
-            for calibrated_model in (
-                estimator.calibrated_classifiers_
-            ):
-
-                base_model = None
-
-
-                if hasattr(
-                    calibrated_model,
-                    "estimator"
-                ):
-
-                    base_model = (
-                        calibrated_model.estimator
-                    )
-
-
-                elif hasattr(
-                    calibrated_model,
-                    "base_estimator"
-                ):
-
-                    base_model = (
-                        calibrated_model.base_estimator
-                    )
-
-
-                if base_model is not None:
-
-                    imp = find_feature_importances(
-                        base_model
-                    )
-
-                    if imp is not None:
-
-                        all_importances.append(imp)
-
-
-            if all_importances:
-
-                return np.mean(
-                    np.vstack(all_importances),
-                    axis=0
-                )
-
-
-        # New sklearn estimator wrapper
-        if hasattr(estimator, "estimator"):
-
-            imp = find_feature_importances(
-                estimator.estimator
-            )
-
-            if imp is not None:
-
-                return imp
-
-
-        # Old sklearn wrapper
-        if hasattr(estimator, "base_estimator"):
-
-            imp = find_feature_importances(
-                estimator.base_estimator
-            )
-
-            if imp is not None:
-
-                return imp
-
-
-        return None
-
-
-    # --------------------------------------------------------
-    # GET PREPROCESSOR
-    # --------------------------------------------------------
-
-    def get_preprocessor(estimator):
-
-        if hasattr(estimator, "named_steps"):
-
-            if "preprocessor" in estimator.named_steps:
-
-                return estimator.named_steps[
-                    "preprocessor"
-                ]
-
-            if "transformer" in estimator.named_steps:
-
-                return estimator.named_steps[
-                    "transformer"
-                ]
-
-        return None
-
-
-    preprocessor = get_preprocessor(model)
-
-
-    raw_importances = find_feature_importances(model)
-
-
-    feature_rows = []
-
-
-    if (
-        raw_importances is not None
-        and preprocessor is not None
-    ):
-
-        try:
-
-            transformed_names = (
-                preprocessor
-                .get_feature_names_out()
-            )
-
-
-            if len(raw_importances) == len(
-                transformed_names
-            ):
-
-                grouped = {}
-
-
-                for name, importance in zip(
-                    transformed_names,
-                    raw_importances
-                ):
-
-                    clean_name = name
-
-
-                    if "__" in clean_name:
-
-                        clean_name = (
-                            clean_name
-                            .split("__", 1)[1]
-                        )
-
-
-                    # Aggregate all occupation one-hot
-                    # variables back into Occupation.
-                    if clean_name.startswith(
-                        "Occupation_"
-                    ):
-
-                        clean_name = "Occupation"
-
-
-                    grouped[clean_name] = (
-                        grouped.get(clean_name, 0)
-                        + float(importance)
-                    )
-
-
-                # Keep exactly the seven customer features.
-                for feature in EXPECTED_FEATURES:
-
-                    importance = grouped.get(
-                        feature,
-                        0.0
-                    )
-
-                    feature_rows.append(
-                        {
-                            "Feature": feature,
-                            "Importance": importance
-                        }
-                    )
-
-
-        except Exception:
-
-            feature_rows = []
-
-
-    # --------------------------------------------------------
-    # FALLBACK
-    # --------------------------------------------------------
-
-    if not feature_rows:
-
-        # Final model training output confirms these
-        # native feature importance values for the
-        # seven customer-facing attributes.
-
-        feature_rows = [
-            {
-                "Feature": "Outstanding_Debt",
-                "Importance": 0.199782
+        <div style="font-size:9px;color:#475569;letter-spacing:2px;margin-top:4px;text-transform:uppercase;font-weight:600;">Credit Intelligence</div>
+    </div>
+
+    <div style="padding:0 12px;margin-bottom:22px;">
+        <div style="font-size:9px;font-weight:800;color:#334155;text-transform:uppercase;letter-spacing:2px;padding:0 8px;margin-bottom:10px;">Navigation</div>
+
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:rgba(59,130,246,0.15);margin-bottom:3px;border:1px solid rgba(59,130,246,0.15);">
+            <span style="font-size:14px;">📊</span>
+            <span style="font-size:13px;font-weight:700;color:#93C5FD;">Credit Assessment</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:3px;">
+            <span style="font-size:14px;opacity:0.35;">🔍</span>
+            <span style="font-size:13px;font-weight:500;color:#475569;">Model Insights</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:3px;">
+            <span style="font-size:14px;opacity:0.35;">ℹ️</span>
+            <span style="font-size:13px;font-weight:500;color:#475569;">Model Information</span>
+        </div>
+    </div>
+
+    <div style="padding:0 12px;margin-bottom:22px;">
+        <div style="font-size:9px;font-weight:800;color:#334155;text-transform:uppercase;letter-spacing:2px;padding:0 8px;margin-bottom:10px;">Model Status</div>
+        <div style="background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.18);border-radius:10px;padding:14px 16px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                <div style="width:8px;height:8px;background:#10B981;border-radius:50%;box-shadow:0 0 6px rgba(16,185,129,0.6);flex-shrink:0;"></div>
+                <span style="font-size:11px;font-weight:800;color:#6EE7B7;letter-spacing:0.5px;">ACTIVE</span>
+            </div>
+            <div style="font-size:11px;color:#64748B;line-height:1.9;">
+                <div>Extra Trees Classifier</div>
+                <div>Isotonic Calibration</div>
+                <div>3-Class Output</div>
+                <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);color:#475569;">31,711 training records</div>
+            </div>
+        </div>
+    </div>
+    """)
+
+    st.markdown("---")
+
+    H("""
+    <div style="padding:14px 20px 22px;">
+        <div style="font-size:13px;font-weight:700;color:#CBD5E1;margin-bottom:2px;">Rajat Murhe</div>
+        <div style="font-size:11px;color:#475569;">ML AI Engineer</div>
+    </div>
+    """)
+
+# ─────────────────────────────────────────────────────────────────
+# TOP BAR
+# ─────────────────────────────────────────────────────────────────
+H("""
+<div style="background:#FFFFFF;border-bottom:1px solid #E2E8F0;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;margin-left:-2rem;margin-right:-2rem;position:sticky;top:0;z-index:999;box-shadow:0 1px 6px rgba(0,0,0,0.04);">
+    <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:13px;color:#94A3B8;">Platform</span>
+        <span style="color:#CBD5E1;font-size:13px;">›</span>
+        <span style="font-size:13px;color:#0F172A;font-weight:700;">Credit Assessment</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;">
+        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:20px;padding:5px 14px;display:flex;align-items:center;gap:7px;">
+            <div style="width:7px;height:7px;background:#22C55E;border-radius:50%;box-shadow:0 0 5px rgba(34,197,94,0.5);"></div>
+            <span style="font-size:11px;font-weight:800;color:#166534;letter-spacing:0.5px;">EXTRA TREES ACTIVE</span>
+        </div>
+    </div>
+</div>
+""")
+
+# ─────────────────────────────────────────────────────────────────
+# TWO-COLUMN LAYOUT
+# ─────────────────────────────────────────────────────────────────
+left_col, right_col = st.columns([0.95, 1.05], gap="large")
+
+# ─────────────────────────────────────────────────────────────────
+# LEFT — INPUT FORM
+# ─────────────────────────────────────────────────────────────────
+with left_col:
+    H("""
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+        <div style="width:30px;height:30px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">1</div>
+        <div>
+            <div style="font-size:14px;font-weight:800;color:#0F172A;text-transform:uppercase;letter-spacing:0.6px;">Personal & Financial Profile</div>
+            <div style="font-size:12px;color:#64748B;margin-top:1px;">Enter applicant details to generate a credit assessment</div>
+        </div>
+    </div>
+    """)
+
+    with st.form("credit_form"):
+        H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #F1F5F9;">Personal Information</div>""")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            age = st.number_input("Age (years)", min_value=18, max_value=100, value=30, step=1,
+                                  help="Applicant's age in years")
+        with c2:
+            occupation = st.selectbox("Occupation", options=OCCUPATIONS, index=4)
+
+        H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1.5px;margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid #F1F5F9;">Financial Information</div>""")
+
+        c3, c4 = st.columns(2)
+        with c3:
+            annual_income = st.number_input("Annual Income (₹)", min_value=0.0, value=600000.0, step=10000.0, format="%.0f")
+        with c4:
+            delayed_payments = st.number_input("Delayed Payments", min_value=0, max_value=50, value=1, step=1,
+                                               help="Number of recorded late/missed payments")
+
+        c5, c6 = st.columns(2)
+        with c5:
+            emi = st.number_input("Total Monthly EMI (₹)", min_value=0.0, value=5000.0, step=500.0, format="%.0f")
+        with c6:
+            outstanding_debt = st.number_input("Outstanding Debt (₹)", min_value=0.0, value=150000.0, step=5000.0, format="%.0f")
+
+        monthly_balance = st.number_input(
+            "Monthly Closing Balance (₹)", min_value=0.0, value=40000.0, step=1000.0, format="%.0f",
+            help="Average monthly bank balance after all expenses")
+
+        # ── live derived ratio panel ──
+        mi        = annual_income / 12 if annual_income > 0 else 1
+        emi_ratio = emi / mi           if mi > 0           else 0
+        dti       = outstanding_debt / annual_income if annual_income > 0 else 0
+        sav_pct   = min(100.0, monthly_balance / mi * 100) if mi > 0 else 0
+
+        def _clr(bad): return "#EF4444" if bad else "#10B981"
+        def _lbl(bad, good_txt, bad_txt): return bad_txt if bad else good_txt
+
+        H(f"""
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:16px 18px;margin:18px 0;display:flex;gap:0;align-items:stretch;">
+            <div style="flex:1;text-align:center;padding:0 10px;">
+                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">EMI / Income</div>
+                <div style="font-size:22px;font-weight:900;color:{_clr(emi_ratio>0.4)};line-height:1;">{emi_ratio:.0%}</div>
+                <div style="font-size:10px;color:#94A3B8;margin-top:3px;">{_lbl(emi_ratio>0.4,"✓ Healthy","▲ High")}</div>
+            </div>
+            <div style="width:1px;background:#E2E8F0;"></div>
+            <div style="flex:1;text-align:center;padding:0 10px;">
+                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Debt / Income</div>
+                <div style="font-size:22px;font-weight:900;color:{_clr(dti>1.5)};line-height:1;">{dti:.2f}×</div>
+                <div style="font-size:10px;color:#94A3B8;margin-top:3px;">{_lbl(dti>1.5,"✓ Healthy","▲ High")}</div>
+            </div>
+            <div style="width:1px;background:#E2E8F0;"></div>
+            <div style="flex:1;text-align:center;padding:0 10px;">
+                <div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Savings Rate</div>
+                <div style="font-size:22px;font-weight:900;color:{_clr(sav_pct<10)};line-height:1;">{sav_pct:.0f}%</div>
+                <div style="font-size:10px;color:#94A3B8;margin-top:3px;">{_lbl(sav_pct<10,"✓ Healthy","▲ Low")}</div>
+            </div>
+        </div>
+        """)
+
+        H("""<div style="font-size:10px;color:#94A3B8;margin-bottom:14px;">
+            7 model inputs: Age · Occupation · Annual Income · Delayed Payments · Monthly EMI · Outstanding Debt · Monthly Balance
+        </div>""")
+
+        b1, b2 = st.columns([2, 1])
+        with b1:
+            submitted = st.form_submit_button("▶  Run Credit Assessment", type="primary", use_container_width=True)
+        with b2:
+            reset = st.form_submit_button("Reset", type="secondary", use_container_width=True)
+
+# ─────────────────────────────────────────────────────────────────
+# RIGHT — ASSESSMENT PANEL
+# ─────────────────────────────────────────────────────────────────
+with right_col:
+    H("""
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+        <div style="width:30px;height:30px;background:#2563EB;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0;">2</div>
+        <div>
+            <div style="font-size:14px;font-weight:800;color:#0F172A;text-transform:uppercase;letter-spacing:0.6px;">Live Credit Assessment</div>
+            <div style="font-size:12px;color:#64748B;margin-top:1px;">Instant AI-powered risk analysis</div>
+        </div>
+    </div>
+    """)
+
+    # handle reset
+    if reset and "result" in st.session_state:
+        del st.session_state["result"]
+        st.rerun()
+
+    # handle submit
+    if submitted:
+        input_df              = build_input_df(age, occupation, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance)
+        prediction, probabilities = run_prediction(input_df)
+        risk_score            = compute_risk_score(probabilities, class_names)
+        recs                  = get_recommendations(prediction, annual_income, delayed_payments, emi, outstanding_debt, monthly_balance)
+        prob_map              = {c: float(probabilities[i]) for i, c in enumerate(class_names)}
+
+        st.session_state["result"] = {
+            "prediction":    prediction,
+            "probabilities": probabilities,
+            "risk_score":    risk_score,
+            "prob_map":      prob_map,
+            "recs":          recs,
+            "input_df":      input_df,
+            "inputs": {
+                "Age":               age,
+                "Occupation":        occupation,
+                "Annual Income":     f"₹{annual_income:,.0f}",
+                "Delayed Payments":  int(delayed_payments),
+                "Total Monthly EMI": f"₹{emi:,.0f}",
+                "Outstanding Debt":  f"₹{outstanding_debt:,.0f}",
+                "Monthly Balance":   f"₹{monthly_balance:,.0f}",
             },
-            {
-                "Feature": "Age",
-                "Importance": 0.147663
-            },
-            {
-                "Feature": "Total_EMI_per_month",
-                "Importance": 0.144677
-            },
-            {
-                "Feature": "Num_of_Delayed_Payment",
-                "Importance": 0.122440
-            },
-            {
-                "Feature": "Annual_Income",
-                "Importance": 0.112197
-            },
-            {
-                "Feature": "Monthly_Balance",
-                "Importance": 0.083416
-            },
-            {
-                "Feature": "Occupation",
-                "Importance": 0.089825
-            }
-        ]
-
-
-    importance_df = pd.DataFrame(
-        feature_rows
-    )
-
-
-    # Normalise so displayed values sum to 100%.
-
-    total_importance = (
-        importance_df["Importance"].sum()
-    )
-
-
-    if total_importance > 0:
-
-        importance_df["Importance"] = (
-            importance_df["Importance"]
-            / total_importance
-        )
-
-
-    importance_df = (
-        importance_df
-        .sort_values(
-            "Importance",
-            ascending=False
-        )
-        .reset_index(drop=True)
-    )
-
-
-    # --------------------------------------------------------
-    # EXPLAINABILITY TABLE
-    # --------------------------------------------------------
-
-    with st.expander(
-        "View Feature Contribution Analysis",
-        expanded=False
-    ):
-
-        display_df = importance_df.copy()
-
-        display_df["Importance"] = (
-            display_df["Importance"] * 100
-        ).map(
-            lambda x: f"{x:.2f}%"
-        )
-
-
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True
-        )
-
-
-        st.caption(
-            "Feature importance represents the relative "
-            "contribution of model features based on the "
-            "tree-based model's learned importance. It does "
-            "not imply causation."
-        )
-
-
-    # ========================================================
-    # TOP FEATURES
-    # ========================================================
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    top_features = importance_df.head(3)
-
-
-    top_cols = st.columns(
-        len(top_features)
-    )
-
-
-    for i, (_, row) in enumerate(
-        top_features.iterrows()
-    ):
-
-        with top_cols[i]:
-
-            render_html(
-                f"""
-                <div style="
-                    padding:25px;
-                    border-radius:18px;
-                    border:1px solid
-                        rgba(105,130,255,0.15);
-                    background:#0D1421;
-                ">
-
-                    <div style="
-                        color:#7F8BA1;
-                        font-size:12px;
-                        font-weight:700;
-                        letter-spacing:1px;
-                    ">
-                        TOP MODEL FEATURE
-                    </div>
-
-                    <div style="
-                        margin-top:12px;
-                        color:#F4F6FA;
-                        font-size:18px;
-                        font-weight:750;
-                    ">
-                        {row["Feature"]}
-                    </div>
-
-                    <div style="
-                        margin-top:10px;
-                        color:#7186FF;
-                        font-size:25px;
-                        font-weight:800;
-                    ">
-                        {row["Importance"] * 100:.2f}%
-                    </div>
-
-                </div>
-                """
-            )
-
-
-    # ========================================================
-    # MODEL PERFORMANCE
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    st.header("Model Performance")
-
-    st.caption(
-        "Evaluation metrics from the final CrediX model."
-    )
-
-
-    with st.expander(
-        "View Model Evaluation",
-        expanded=False
-    ):
-
-        # ----------------------------------------------------
-        # Known final model metrics
-        # ----------------------------------------------------
-
-        final_metrics = {
-            "Accuracy": 0.7862,
-            "Balanced Accuracy": 0.7362,
-            "Macro Precision": 0.7494,
-            "Macro Recall": 0.7362,
-            "Macro F1": 0.7426,
-            "Weighted F1": 0.7852
         }
 
+    # ── WAITING STATE ──
+    if "result" not in st.session_state:
+        H("""
+        <div style="background:#FFFFFF;border:1.5px solid #E2E8F0;border-radius:14px;padding:64px 40px;text-align:center;">
+            <div style="font-size:54px;margin-bottom:18px;">📊</div>
+            <div style="font-size:18px;font-weight:800;color:#0F172A;margin-bottom:8px;">Awaiting Assessment</div>
+            <div style="font-size:13px;color:#64748B;max-width:280px;margin:0 auto;line-height:1.75;">
+                Complete the financial profile and click
+                <span style="font-weight:800;color:#2563EB;">Run Credit Assessment</span>
+                to generate an instant risk analysis.
+            </div>
+            <div style="display:flex;justify-content:center;gap:0;margin-top:32px;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden;max-width:280px;margin-left:auto;margin-right:auto;">
+                <div style="flex:1;padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0;">
+                    <div style="font-size:22px;font-weight:900;color:#0F172A;">3</div>
+                    <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Classes</div>
+                </div>
+                <div style="flex:1;padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0;">
+                    <div style="font-size:22px;font-weight:900;color:#0F172A;">7</div>
+                    <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Features</div>
+                </div>
+                <div style="flex:1;padding:16px 12px;text-align:center;">
+                    <div style="font-size:22px;font-weight:900;color:#0F172A;">31K</div>
+                    <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Records</div>
+                </div>
+            </div>
+        </div>
+        """)
 
-        metric_cols = st.columns(3)
+    # ── RESULT STATE ──
+    else:
+        r    = st.session_state["result"]
+        pred = r["prediction"]
+        cfg  = RATING.get(pred, RATING["Standard"])
+        risk = r["risk_score"]
 
+        # Rating banner
+        H(f"""
+        <div style="background:linear-gradient(135deg,{cfg['bg']} 0%,#FFFFFF 100%);border:1.5px solid {cfg['border']};border-radius:14px;padding:24px 28px;margin-bottom:18px;">
+            <div style="font-size:9px;font-weight:800;color:{cfg['dark']};text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Final Credit Assessment</div>
+            <div style="font-size:54px;font-weight:900;color:{cfg['hex']};letter-spacing:-2.5px;line-height:1;margin-bottom:12px;">{pred.upper()}</div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <div style="display:inline-block;background:rgba(255,255,255,0.85);border:1.5px solid {cfg['border']};border-radius:20px;padding:5px 16px;font-size:12px;font-weight:700;color:{cfg['dark']};">{pred} Credit Profile</div>
+                <div style="display:inline-block;background:rgba(255,255,255,0.6);border:1px solid #E2E8F0;border-radius:20px;padding:5px 16px;font-size:12px;font-weight:600;color:#64748B;">Risk Score: <b style="color:{cfg['hex']};">{risk:.0f} / 100</b></div>
+            </div>
+        </div>
+        """)
 
-        metric_items = list(
-            final_metrics.items()
-        )
+        # Gauge + probabilities
+        gc, pc = st.columns(2)
+        with gc:
+            H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:4px;">Risk Gauge</div>""")
+            if PLOTLY_OK:
+                st.plotly_chart(make_gauge(risk, pred), use_container_width=True, config={"displayModeBar": False})
+            H("""<div style="text-align:center;margin-top:-10px;font-size:10px;color:#94A3B8;">0 = Low Risk · 100 = Critical</div>""")
 
+        with pc:
+            H("""<div style="font-size:9px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;text-align:center;margin-bottom:4px;">Class Probabilities</div>""")
+            if PLOTLY_OK:
+                st.plotly_chart(make_prob_chart(r["probabilities"], class_names, pred),
+                                use_container_width=True, config={"displayModeBar": False})
 
-        for i, (name, value) in enumerate(
-            metric_items
-        ):
+        # Confidence bar
+        max_prob = float(max(r["probabilities"])) * 100
+        H(f"""
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+                <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;">Model Confidence</div>
+                <div style="font-size:11px;color:#64748B;margin-top:2px;">Highest predicted class probability</div>
+            </div>
+            <div style="font-size:28px;font-weight:900;color:#0F172A;letter-spacing:-1px;">{max_prob:.1f}%</div>
+        </div>
+        """)
 
-            with metric_cols[i % 3]:
+# ─────────────────────────────────────────────────────────────────
+# ANALYTICS TABS  (visible only after an assessment)
+# ─────────────────────────────────────────────────────────────────
+if "result" in st.session_state:
+    r    = st.session_state["result"]
+    pred = r["prediction"]
+    cfg  = RATING.get(pred, RATING["Standard"])
 
-                render_html(
-                    f"""
-                    <div style="
-                        padding:25px;
-                        margin:8px 0;
-                        border-radius:16px;
-                        background:#0D1421;
-                        border:1px solid
-                            rgba(105,130,255,0.15);
-                    ">
+    st.markdown("<br>", unsafe_allow_html=True)
 
-                        <div style="
-                            color:#7F8BA1;
-                            font-size:13px;
-                        ">
-                            {name}
-                        </div>
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "  Feature Impact  ",
+        "  Recommendations  ",
+        "  Model Performance  ",
+        "  Input Summary  ",
+        "  Export Report  ",
+    ])
 
-                        <div style="
-                            margin-top:8px;
-                            color:#F4F6FA;
-                            font-size:28px;
-                            font-weight:800;
-                        ">
-                            {value * 100:.2f}%
-                        </div>
+    # ── TAB 1: Feature Impact ──────────────────────────────────
+    with tab1:
+        ta, tb = st.columns([1.2, 0.85], gap="large")
 
+        with ta:
+            H("""
+            <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Key Model Drivers</div>
+            <div style="font-size:12px;color:#64748B;margin-bottom:18px;">Relative Gini-MDI importance learned by the Extra Trees ensemble across all calibrated estimators</div>
+            """)
+            if PLOTLY_OK:
+                st.plotly_chart(make_importance_chart(importance_df),
+                                use_container_width=True, config={"displayModeBar": False})
+            H("""<div style="font-size:11px;color:#94A3B8;margin-top:4px;">
+                ⚠️ Importance reflects model learning — it does not imply direct causation.
+            </div>""")
+
+        with tb:
+            H("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:16px;">Breakdown</div>""")
+            for _, row in importance_df.iterrows():
+                disp = FEAT_DISPLAY.get(row["Feature"], row["Feature"])
+                pct  = row["Importance"] * 100
+                bar  = int(pct / importance_df["Importance"].max() * 100)
+                H(f"""
+                <div style="margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span style="font-size:12px;font-weight:700;color:#374151;">{disp}</span>
+                        <span style="font-size:12px;font-weight:800;color:#0F172A;">{pct:.1f}%</span>
                     </div>
-                    """
-                )
+                    <div style="background:#F1F5F9;border-radius:5px;height:7px;">
+                        <div style="width:{bar}%;height:100%;background:#2563EB;border-radius:5px;"></div>
+                    </div>
+                </div>
+                """)
 
+    # ── TAB 2: Recommendations ────────────────────────────────
+    with tab2:
+        H("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Personalised Financial Guidance</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:22px;">Actionable recommendations based on this applicant's specific financial profile</div>
+        """)
+
+        bc = cfg["hex"]
+        for title, body in r["recs"]:
+            H(f"""
+            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-left:4px solid {bc};border-radius:10px;padding:18px 22px;margin-bottom:14px;">
+                <div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:7px;">{title}</div>
+                <div style="font-size:13px;color:#475569;line-height:1.75;">{body}</div>
+            </div>
+            """)
+
+        H("""
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:14px 18px;margin-top:6px;">
+            <div style="font-size:11px;color:#94A3B8;line-height:1.6;">
+                ⚠️ Recommendations are generated algorithmically from submitted data for analytical purposes only. They do not constitute financial, legal, or credit advice.
+            </div>
+        </div>
+        """)
+
+    # ── TAB 3: Model Performance ──────────────────────────────
+    with tab3:
+        H("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Model Performance Metrics</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:22px;">Evaluated on a held-out test set — Extra Trees Classifier with isotonic calibration</div>
+        """)
+
+        m_cols = st.columns(3)
+        for i, (label, val) in enumerate(MODEL_METRICS.items()):
+            with m_cols[i % 3]:
+                st.metric(label, f"{val:.2f}%")
 
         st.markdown("<br>", unsafe_allow_html=True)
+        H("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:16px;">Per-Class Breakdown</div>""")
 
+        c_cols = st.columns(3)
+        for i, (cls, mets) in enumerate(CLASS_METRICS.items()):
+            c = RATING.get(cls, {})
+            with c_cols[i]:
+                H(f"""
+                <div style="background:#FFFFFF;border:1.5px solid {c.get('border','#E2E8F0')};border-radius:12px;padding:20px;text-align:center;">
+                    <div style="font-size:11px;font-weight:800;color:{c.get('dark','#374151')};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:14px;">{cls}</div>
+                    <div style="display:flex;justify-content:space-around;gap:4px;">
+                        <div>
+                            <div style="font-size:20px;font-weight:900;color:{c.get('hex','#374151')};">{mets['Precision']:.1f}%</div>
+                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Precision</div>
+                        </div>
+                        <div>
+                            <div style="font-size:20px;font-weight:900;color:{c.get('hex','#374151')};">{mets['Recall']:.1f}%</div>
+                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">Recall</div>
+                        </div>
+                        <div>
+                            <div style="font-size:20px;font-weight:900;color:{c.get('hex','#374151')};">{mets['F1']:.1f}%</div>
+                            <div style="font-size:9px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-top:2px;">F1</div>
+                        </div>
+                    </div>
+                </div>
+                """)
 
-        performance_data = pd.DataFrame(
-            {
-                "Class": [
-                    "Good",
-                    "Poor",
-                    "Standard"
-                ],
-                "Precision": [
-                    0.7498,
-                    0.6762,
-                    0.8222
-                ],
-                "Recall": [
-                    0.7285,
-                    0.6388,
-                    0.8414
-                ],
-                "F1": [
-                    0.7390,
-                    0.6570,
-                    0.8317
-                ]
-            }
-        )
-
-
-        performance_display = (
-            performance_data.copy()
-        )
-
-
-        for col in [
-            "Precision",
-            "Recall",
-            "F1"
-        ]:
-
-            performance_display[col] = (
-                performance_display[col] * 100
-            ).map(
-                lambda x: f"{x:.2f}%"
-            )
-
-
-        st.dataframe(
-            performance_display,
-            hide_index=True,
-            use_container_width=True
-        )
-
-
-        st.caption(
-            "Final model: Extra Trees with isotonic "
-            "probability calibration. "
-            "The model was selected using cross-validated "
-            "macro F1."
-        )
-
-
-    # ========================================================
-    # MODEL INPUT
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    st.header("Model Input")
-
-    st.caption(
-        "The seven customer-facing attributes used by CrediX."
-    )
-
-
-    input_display = pd.DataFrame(
-        {
-            "Feature": [
-                "Age",
-                "Occupation",
-                "Annual Income",
-                "Delayed Payments",
-                "Total Monthly EMI",
-                "Outstanding Debt",
-                "Monthly Balance"
-            ],
-
-            "Value": [
-                str(age),
-                occupation,
-                money(annual_income),
-                str(delayed_payments),
-                money(monthly_emi),
-                money(outstanding_debt),
-                money(monthly_balance)
-            ]
-        }
-    )
-
-
-    st.dataframe(
-        input_display,
-        hide_index=True,
-        use_container_width=True
-    )
-
-
-    # ========================================================
-    # TECHNICAL DETAILS
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    with st.expander(
-        "View Technical Model Details",
-        expanded=False
-    ):
-
-        st.write(
-            "Algorithm: Extra Trees"
-        )
-
-        st.write(
-            "Probability Calibration: Isotonic"
-        )
-
-        st.write(
-            "Training Dataset: 31,711 records"
-        )
-
-        st.write(
-            "Customer Features: 7"
-        )
-
-        st.write(
-            "Classes: Good, Poor, Standard"
-        )
-
-        st.write(
-            "Model Selection Criterion: Cross-validated Macro F1"
-        )
-
-        st.write(
-            "Final Test Macro F1: 74.26%"
-        )
-
-        st.write(
-            "Final Test Balanced Accuracy: 73.62%"
-        )
-
-
-    # ========================================================
-    # DISCLAIMER
-    # ========================================================
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-
-    render_html(
-        """
-        <div style="
-            padding:30px;
-            border-radius:20px;
-            background:#0D111B;
-            border:1px solid
-                rgba(105,130,255,0.12);
-        ">
-
-            <div style="
-                color:#A5AEC0;
-                font-size:16px;
-                font-weight:700;
-            ">
-                CrediX — Explainable Machine Learning
-                Credit Intelligence
+        H("""
+        <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:16px 20px;margin-top:22px;">
+            <div style="font-size:12px;color:#64748B;line-height:1.8;">
+                <b style="color:#374151;">Methodology:</b> Final model selected via 10-fold cross-validated macro F1.
+                Probability calibration applied post-training via isotonic regression on a held-out calibration split.
+                Feature importance derived by averaging Gini-MDI scores across all calibrated base estimators.
             </div>
-
-            <div style="
-                margin-top:18px;
-                color:#68748A;
-                font-size:13px;
-                line-height:1.7;
-            ">
-                CrediX is a machine-learning-based analytical
-                decision-support system. Predictions are not
-                financial advice, credit bureau scores, or
-                actual lending decisions.
-            </div>
-
         </div>
-        """
-    )
+        """)
 
+    # ── TAB 4: Input Summary ──────────────────────────────────
+    with tab4:
+        H("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Assessment Input Summary</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:22px;">Exact values submitted to the model for this assessment session</div>
+        """)
 
-# ============================================================
-# END
-# ============================================================
+        s1, s2 = st.columns([1, 1], gap="large")
+
+        with s1:
+            H("""<div style="font-size:11px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Profile Details</div>""")
+            rows_html = ""
+            for k, v in r["inputs"].items():
+                rows_html += f"""
+                <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #F1F5F9;">
+                    <span style="font-size:13px;color:#64748B;font-weight:500;">{k}</span>
+                    <span style="font-size:13px;color:#0F172A;font-weight:700;">{v}</span>
+                </div>
+                """
+            H(f"""<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;padding:4px 18px;">{rows_html}</div>""")
+
+        with s2:
+            H("""<div style="font-size:11px;font-weight:800;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Assessment Outcome</div>""")
+
+            prob_map = r["prob_map"]
+            color_m  = {"Good": "#10B981", "Standard": "#F59E0B", "Poor": "#EF4444"}
+
+            H(f"""
+            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;padding:20px;">
+                <div style="margin-bottom:18px;">
+                    <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Credit Class</div>
+                    <div style="font-size:30px;font-weight:900;color:{cfg['hex']};">{pred}</div>
+                </div>
+                <div style="margin-bottom:18px;">
+                    <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Risk Score</div>
+                    <div style="font-size:30px;font-weight:900;color:#0F172A;">{r['risk_score']:.0f}<span style="font-size:14px;color:#94A3B8;font-weight:600;"> / 100</span></div>
+                </div>
+                <div>
+                    <div style="font-size:10px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Class Probabilities</div>
+            """)
+
+            for cls in class_names:
+                pct = prob_map.get(cls, 0) * 100
+                clr = color_m.get(cls, "#6B7280")
+                bold = "800" if cls == pred else "500"
+                H(f"""
+                <div style="margin-bottom:11px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span style="font-size:12px;color:#374151;font-weight:{bold};">{cls}</span>
+                        <span style="font-size:12px;font-weight:800;color:{clr};">{pct:.1f}%</span>
+                    </div>
+                    <div style="background:#F1F5F9;border-radius:4px;height:7px;">
+                        <div style="width:{pct}%;height:100%;background:{clr};border-radius:4px;"></div>
+                    </div>
+                </div>
+                """)
+
+            H("</div></div>")
+
+    # ── TAB 5: Export Report ──────────────────────────────────
+    with tab5:
+        H("""
+        <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:4px;">Export Assessment Report</div>
+        <div style="font-size:12px;color:#64748B;margin-bottom:24px;">Generate a detailed professional PDF report for this credit assessment</div>
+        """)
+
+        rc1, rc2 = st.columns([1, 1], gap="large")
+
+        with rc1:
+            H(f"""
+            <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;padding:26px;">
+                <div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:18px;">Report Contents</div>
+                <div style="font-size:13px;color:#475569;line-height:2.4;">
+                    ✓ &nbsp; Applicant financial profile summary<br>
+                    ✓ &nbsp; Credit classification: <b style="color:{cfg['hex']};">{pred}</b><br>
+                    ✓ &nbsp; Class probability breakdown<br>
+                    ✓ &nbsp; Feature importance table<br>
+                    ✓ &nbsp; Personalised recommendations<br>
+                    ✓ &nbsp; Model performance metrics<br>
+                    ✓ &nbsp; Methodology &amp; disclaimer
+                </div>
+            </div>
+            """)
+
+        with rc2:
+            H("""
+            <div style="background:#F8FAFC;border:1.5px dashed #CBD5E1;border-radius:12px;padding:32px;text-align:center;">
+                <div style="font-size:38px;margin-bottom:14px;">📄</div>
+                <div style="font-size:15px;font-weight:800;color:#0F172A;margin-bottom:6px;">PDF Credit Report</div>
+                <div style="font-size:12px;color:#64748B;margin-bottom:22px;line-height:1.6;">Professional multi-page report with full assessment details</div>
+            </div>
+            """)
+
+            if PDF_OK:
+                try:
+                    recs_clean = [(t.split(" ", 1)[-1] if t[0] in "🔔📉⚖️🏦✅📋📊" else t, b)
+                                  for t, b in r["recs"]]
+                    pdf_bytes = pdf_mod.generate_pdf(
+                        input_df      = r["input_df"],
+                        prediction    = r["prediction"],
+                        probabilities = r["probabilities"],
+                        class_names   = class_names,
+                        recommendations = recs_clean,
+                        importance_df = importance_df,
+                    )
+                    if pdf_bytes:
+                        st.download_button(
+                            label    = "⬇  Download PDF Report",
+                            data     = io.BytesIO(pdf_bytes),
+                            file_name= f"CrediX_{r['prediction']}_Assessment.pdf",
+                            mime     = "application/pdf",
+                            use_container_width=True,
+                        )
+                except Exception as exc:
+                    st.error(f"PDF generation failed: {exc}")
+            else:
+                H("""<div style="font-size:12px;color:#94A3B8;text-align:center;margin-top:10px;">PDF unavailable — ensure reportlab is installed.</div>""")
