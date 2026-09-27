@@ -573,7 +573,9 @@ button[kind="primary"] p,
     color: #64748B !important; font-size: 13px; font-weight: 600; padding: 12px 20px;
 }
 .stTabs [aria-selected="true"] { color: #2563EB !important; border-bottom-color: #2563EB !important; }
-div[data-testid="stMetric"] { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 16px !important; }
+div[data-testid="stMetric"] { background: #FFFFFF !important; border: 1.5px solid #E2E8F0 !important; border-radius: 12px !important; padding: 16px 20px !important; }
+div[data-testid="stMetricValue"], div[data-testid="stMetricValue"] * { color: #0F172A !important; -webkit-text-fill-color: #0F172A !important; font-weight: 900 !important; }
+div[data-testid="stMetricLabel"], div[data-testid="stMetricLabel"] * { color: #64748B !important; -webkit-text-fill-color: #64748B !important; font-weight: 700 !important; }
 [data-testid="stForm"] { background: #FFFFFF !important; border: 1.5px solid #E2E8F0 !important; border-radius: 14px !important; padding: 12px !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -983,10 +985,14 @@ if "result" in st.session_state:
         m_cols = st.columns(3)
         for i, (label, val) in enumerate(MODEL_METRICS.items()):
             with m_cols[i % 3]:
-                st.metric(label, f"{val:.2f}%")
+                st.html(f"""
+                <div style="background:#FFFFFF;border:1.5px solid #E2E8F0;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.03);margin-bottom:14px;">
+                    <div style="font-size:11px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">{label}</div>
+                    <div style="font-size:28px;font-weight:900;color:#0F172A;letter-spacing:-0.5px;line-height:1.2;">{val:.2f}%</div>
+                </div>
+                """)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.html("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin-bottom:12px;">Class-Specific Evaluation</div>""")
+        st.html("""<div style="font-size:13px;font-weight:800;color:#0F172A;margin:8px 0 12px 0;">Class-Specific Evaluation</div>""")
         c_cols = st.columns(3)
         for i, (cls, mets) in enumerate(CLASS_METRICS.items()):
             c = RATING_CONFIG.get(cls, {})
